@@ -47,7 +47,8 @@ spend controls.
 
 1. Upload a scanned PDF.
 2. Choose the story page range.
-3. Choose the OCR language. Albanian uses Tesseract's `sqi` language model.
+3. Choose the OCR language. The picker includes the full practical Tesseract
+   traineddata language set, and Albanian uses the `sqi` language model.
 4. Run **Render & OCR**.
 5. Drag/edit text boxes in the review screen.
 6. Run **Remove Burned-In Text**.
@@ -57,6 +58,8 @@ spend controls.
 
 - The app is tuned for storybooks: full-page art, small amounts of overlaid
   text, and simple text regions.
+- The OCR language field accepts raw Tesseract codes, so you can combine
+  languages with `+` such as `eng+sqi`.
 - The image model dropdown includes `gpt-image-2`, `gpt-image-1.5`,
   `gpt-image-1`, and `gpt-image-1-mini`. Choose a lower-cost model when image
   cleanup quality is less important.

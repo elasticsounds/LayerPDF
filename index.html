@@ -29,21 +29,10 @@
           </label>
           <label class="field">
             <span>OCR language</span>
-            <select id="ocrLang">
-              <option value="sqi" selected>Albanian / Shqip (sqi)</option>
-              <option value="eng">English (eng)</option>
-              <option value="deu">German (deu)</option>
-              <option value="fra">French (fra)</option>
-              <option value="ita">Italian (ita)</option>
-              <option value="spa">Spanish (spa)</option>
-              <option value="por">Portuguese (por)</option>
-              <option value="nld">Dutch (nld)</option>
-              <option value="hrv">Croatian (hrv)</option>
-              <option value="srp_latn">Serbian Latin (srp_latn)</option>
-              <option value="tur">Turkish (tur)</option>
-              <option value="ell">Greek (ell)</option>
-            </select>
+            <input id="ocrLang" list="ocrLangOptions" value="sqi" autocomplete="off" />
+            <datalist id="ocrLangOptions"></datalist>
           </label>
+          <p class="hint">Search by name or type a Tesseract code. Combine languages with +, e.g. eng+sqi.</p>
           <button id="renderBtn" class="primary">Render & OCR</button>
         </div>
 

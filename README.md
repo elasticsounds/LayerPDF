@@ -49,10 +49,12 @@ spend controls.
 2. Choose the story page range.
 3. Choose the OCR language. The picker includes the full practical Tesseract
    traineddata language set, and Albanian uses the `sqi` language model.
-4. Run **Render & OCR**.
-5. Drag/edit text boxes in the review screen.
-6. Run **Remove Burned-In Text**.
-7. Export a layered PDF or editable PowerPoint.
+4. Tune the OCR confidence, white backing filter, and optional text size
+   override when illustrated backgrounds create false text boxes.
+5. Run **Render & OCR**.
+6. Drag/edit text boxes in the review screen.
+7. Run **Remove Burned-In Text**.
+8. Export a layered PDF or editable PowerPoint.
 
 ## Notes
 
@@ -60,6 +62,10 @@ spend controls.
   text, and simple text regions.
 - The OCR language field accepts raw Tesseract codes, so you can combine
   languages with `+` such as `eng+sqi`.
+- OCR filtering rejects low-confidence lines, oversized boxes, tiny fragments,
+  non-text-like strings, and optional non-white-backed regions.
+- Detected text sizes are normalized across the processed batch unless a text
+  size override is provided.
 - The image model dropdown includes `gpt-image-2`, `gpt-image-1.5`,
   `gpt-image-1`, and `gpt-image-1-mini`. Choose a lower-cost model when image
   cleanup quality is less important.

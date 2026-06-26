@@ -110,6 +110,29 @@ h1 {
   color: var(--muted);
 }
 
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.field-grid .field {
+  margin-bottom: 6px;
+}
+
+.check-field {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 4px 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.check-field input {
+  width: auto;
+}
+
 input,
 select,
 textarea {
@@ -302,13 +325,20 @@ summary {
 
 .line-row {
   display: grid;
-  grid-template-columns: 1fr 56px 56px;
+  grid-template-columns: 1fr 56px 56px 48px;
   gap: 7px;
+  align-items: center;
 }
 
 .line-row input {
   padding: 7px 8px;
   font-size: 12px;
+}
+
+.confidence {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
 }
 
 @media (max-width: 900px) {

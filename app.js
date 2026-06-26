@@ -149,6 +149,9 @@ const els = {
   pageRange: $("pageRange"),
   ocrLang: $("ocrLang"),
   ocrLangOptions: $("ocrLangOptions"),
+  minConfidence: $("minConfidence"),
+  requireLightArea: $("requireLightArea"),
+  fontSizeOverride: $("fontSizeOverride"),
   apiKey: $("apiKey"),
   imageModel: $("imageModel"),
   imageSize: $("imageSize"),
@@ -181,6 +184,12 @@ els.renderBtn.addEventListener("click", renderAndOcr);
 els.cleanBtn.addEventListener("click", () => cleanPages(state.pages));
 els.exportPdfBtn.addEventListener("click", exportLayeredPdf);
 els.exportPptxBtn.addEventListener("click", exportPowerPoint);
+els.fontSizeOverride.addEventListener("change", () => {
+  if (state.pages.length === 0) return;
+  const fontSize = normalizeFontSizes(state.pages);
+  state.pages.forEach(refreshPageCard);
+  setStatus(`Updated text size to ${fontSize.toFixed(1)}.`, 100);
+});
 
 populateOcrLanguages();
 loadBundledFont();
@@ -264,18 +273,30 @@ async function renderAndOcr() {
       imageDataUrl: rendered.dataUrl,
       cleanDataUrl: rendered.dataUrl,
       lines: [],
+      ocrStats: null,
     };
     state.pages.push(pageState);
     renderPageCard(pageState);
     setStatus(`OCR page ${pageNumber}...`, (i / pages.length) * 50 + 20);
-    pageState.lines = await ocrLines(rendered.canvas, pageState.width, pageState.height);
+    const ocr = await ocrLines(rendered.canvas, pageState.width, pageState.height);
+    pageState.lines = ocr.lines;
+    pageState.ocrStats = ocr.stats;
     if (pageState.lines.length === 0) {
       pageState.lines = [defaultLine()];
     }
     refreshPageCard(pageState);
-    setStatus(`Processed page ${pageNumber}.`, ((i + 1) / pages.length) * 70);
+    setStatus(
+      `Processed page ${pageNumber}: kept ${pageState.ocrStats.kept} of ${pageState.ocrStats.total} OCR lines.`,
+      ((i + 1) / pages.length) * 70,
+    );
   }
-  setStatus("Review the text boxes, then clean images or export.", 100);
+  const fontSize = normalizeFontSizes(state.pages);
+  state.pages.forEach(refreshPageCard);
+  const totals = summarizeOcrStats(state.pages);
+  setStatus(
+    `Review ${totals.kept} kept OCR lines from ${totals.total}; text size ${fontSize.toFixed(1)}.`,
+    100,
+  );
 }
 
 async function renderPdfPage(pageNumber) {
@@ -299,9 +320,12 @@ async function renderPdfPage(pageNumber) {
 
 async function ocrLines(canvas, width, height) {
   const lang = els.ocrLang.value.trim() || "sqi";
+  const settings = getOcrSettings();
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  const imageData = context.getImageData(0, 0, width, height);
   const result = await Tesseract.recognize(canvas, lang);
-  const lines = result.data.lines ?? [];
-  return lines
+  const rawLines = result.data.lines ?? [];
+  const candidates = rawLines
     .map((line, index) => {
       const text = (line.text ?? "").replace(/\s+/g, " ").trim();
       const box = line.bbox;
@@ -310,18 +334,139 @@ async function ocrLines(canvas, width, height) {
       const top = (box.y0 / height) * 100;
       const w = ((box.x1 - box.x0) / width) * 100;
       const h = ((box.y1 - box.y0) / height) * 100;
+      const confidence = Number.isFinite(Number(line.confidence)) ? Number(line.confidence) : 100;
+      const textMetrics = measureTextQuality(text);
+      const lightRatio = sampleLightRatio(imageData, width, height, box);
       return {
         id: `line-${index + 1}`,
         text,
         left,
         top,
         width: Math.max(5, w),
-        height: Math.max(2.8, h),
-        fontSize: Math.max(2.6, h * 0.92),
+        height: Math.max(2.4, h),
+        rawWidth: w,
+        rawHeight: h,
+        rawFontSize: clamp(h * 0.92, 2.2, 5.2),
+        fontSize: clamp(h * 0.92, 2.2, 5.2),
+        confidence,
+        textMetrics,
+        lightRatio,
         color: "#a85652",
       };
     })
     .filter(Boolean);
+  const lines = candidates.filter((line) => shouldKeepOcrLine(line, settings));
+  return {
+    lines,
+    stats: {
+      total: rawLines.length,
+      kept: lines.length,
+      rejected: rawLines.length - lines.length,
+      minConfidence: settings.minConfidence,
+    },
+  };
+}
+
+function getOcrSettings() {
+  const confidenceValue = Number(els.minConfidence.value);
+  return {
+    minConfidence: Number.isFinite(confidenceValue) ? clamp(confidenceValue, 0, 100) : 55,
+    requireLightArea: els.requireLightArea.checked,
+  };
+}
+
+function shouldKeepOcrLine(line, settings) {
+  const { letters, glyphs, letterRatio } = line.textMetrics;
+  const area = line.rawWidth * line.rawHeight;
+  if (line.confidence < settings.minConfidence) return false;
+  if (letters < 2 || glyphs < 2) return false;
+  if (glyphs <= 3 && line.confidence < Math.max(settings.minConfidence, 72)) return false;
+  if (letterRatio < 0.45 && letters < 8) return false;
+  if (line.rawWidth < 2 || line.rawHeight < 0.65) return false;
+  if (line.rawHeight > 8.5 || line.rawWidth > 88 || area > 5.8) return false;
+  if (settings.requireLightArea && line.lightRatio < 0.05) return false;
+  if (settings.requireLightArea && line.lightRatio < 0.16 && line.confidence < 86) return false;
+  return true;
+}
+
+function measureTextQuality(text) {
+  const compact = text.replace(/\s+/g, "");
+  const glyphs = [...compact].length;
+  const letters = (compact.match(/\p{L}/gu) ?? []).length;
+  const digits = (compact.match(/\p{N}/gu) ?? []).length;
+  return {
+    glyphs,
+    letters,
+    digits,
+    letterRatio: glyphs === 0 ? 0 : letters / glyphs,
+  };
+}
+
+function sampleLightRatio(imageData, width, height, box) {
+  const padX = width * 0.014;
+  const padY = height * 0.012;
+  const x0 = clamp(Math.floor(box.x0 - padX), 0, width - 1);
+  const y0 = clamp(Math.floor(box.y0 - padY), 0, height - 1);
+  const x1 = clamp(Math.ceil(box.x1 + padX), x0 + 1, width);
+  const y1 = clamp(Math.ceil(box.y1 + padY), y0 + 1, height);
+  const columns = 14;
+  const rows = 8;
+  let light = 0;
+  let samples = 0;
+  for (let row = 0; row < rows; row += 1) {
+    const y = Math.floor(y0 + ((y1 - y0) * (row + 0.5)) / rows);
+    for (let column = 0; column < columns; column += 1) {
+      const x = Math.floor(x0 + ((x1 - x0) * (column + 0.5)) / columns);
+      const offset = (y * width + x) * 4;
+      const r = imageData.data[offset];
+      const g = imageData.data[offset + 1];
+      const b = imageData.data[offset + 2];
+      const brightness = (r + g + b) / 3;
+      const colorSpread = Math.max(r, g, b) - Math.min(r, g, b);
+      if (brightness > 222 && colorSpread < 58) light += 1;
+      samples += 1;
+    }
+  }
+  return samples === 0 ? 0 : light / samples;
+}
+
+function normalizeFontSizes(pages) {
+  const override = parseOptionalNumber(els.fontSizeOverride.value);
+  const detectedSizes = pages
+    .flatMap((page) => page.lines)
+    .map((line) => line.rawFontSize)
+    .filter((value) => Number.isFinite(value) && value > 0);
+  const fontSize = override ?? clamp(median(detectedSizes) ?? 3.6, 2.4, 4.8);
+  for (const page of pages) {
+    for (const line of page.lines) {
+      line.fontSize = fontSize;
+      line.height = Math.max(line.height, fontSize * 1.05);
+    }
+  }
+  return fontSize;
+}
+
+function summarizeOcrStats(pages) {
+  return pages.reduce(
+    (totals, page) => {
+      totals.total += page.ocrStats?.total ?? 0;
+      totals.kept += page.ocrStats?.kept ?? 0;
+      return totals;
+    },
+    { total: 0, kept: 0 },
+  );
+}
+
+function median(values) {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[middle - 1] + sorted[middle]) / 2 : sorted[middle];
+}
+
+function parseOptionalNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
 }
 
 function defaultLine() {
@@ -332,7 +477,9 @@ function defaultLine() {
     top: 10,
     width: 60,
     height: 5,
+    rawFontSize: 4.2,
     fontSize: 4.2,
+    confidence: 100,
     color: "#a85652",
   };
 }
@@ -354,6 +501,13 @@ function renderPageCard(pageState) {
 function refreshPageCard(pageState) {
   const node = pageCard(pageState);
   if (!node) return;
+  const title = node.querySelector(".page-title");
+  if (pageState.ocrStats) {
+    title.textContent = `Page ${pageState.pageNumber} · ${pageState.ocrStats.kept}/${pageState.ocrStats.total} OCR lines`;
+  } else {
+    title.textContent = `Page ${pageState.pageNumber}`;
+  }
+  node.querySelector("summary").textContent = `Text boxes (${pageState.lines.length})`;
   node.querySelector(".page-image").src = pageState.cleanDataUrl;
   const overlay = node.querySelector(".overlay-layer");
   overlay.innerHTML = "";
@@ -428,6 +582,7 @@ function updateLineList(pageState) {
       <input aria-label="Text" value="${escapeAttr(line.text)}" />
       <input aria-label="Left" type="number" step="0.1" value="${line.left.toFixed(1)}" />
       <input aria-label="Top" type="number" step="0.1" value="${line.top.toFixed(1)}" />
+      <span class="confidence" title="OCR confidence">${Math.round(line.confidence ?? 0)}%</span>
     `;
     const [textInput, leftInput, topInput] = row.querySelectorAll("input");
     textInput.addEventListener("input", () => {

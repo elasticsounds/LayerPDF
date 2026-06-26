@@ -151,7 +151,7 @@ async function renderPdfPage(pageNumber) {
 }
 
 async function ocrLines(canvas, width, height) {
-  const lang = els.ocrLang.value.trim() || "eng";
+  const lang = els.ocrLang.value.trim() || "sqi";
   const result = await Tesseract.recognize(canvas, lang);
   const lines = result.data.lines ?? [];
   return lines
@@ -344,7 +344,7 @@ async function createMaskBlob(page) {
 
 async function callImageEdit(apiKey, imageBlob, maskBlob) {
   const form = new FormData();
-  form.append("model", els.imageModel.value.trim() || "gpt-image-1.5");
+  form.append("model", els.imageModel.value.trim() || "gpt-image-2");
   form.append("image", imageBlob, "page.png");
   form.append("mask", maskBlob, "mask.png");
   form.append("prompt", els.editPrompt.value.trim());

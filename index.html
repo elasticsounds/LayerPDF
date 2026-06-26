@@ -29,7 +29,20 @@
           </label>
           <label class="field">
             <span>OCR language</span>
-            <input id="ocrLang" type="text" value="eng" />
+            <select id="ocrLang">
+              <option value="sqi" selected>Albanian / Shqip (sqi)</option>
+              <option value="eng">English (eng)</option>
+              <option value="deu">German (deu)</option>
+              <option value="fra">French (fra)</option>
+              <option value="ita">Italian (ita)</option>
+              <option value="spa">Spanish (spa)</option>
+              <option value="por">Portuguese (por)</option>
+              <option value="nld">Dutch (nld)</option>
+              <option value="hrv">Croatian (hrv)</option>
+              <option value="srp_latn">Serbian Latin (srp_latn)</option>
+              <option value="tur">Turkish (tur)</option>
+              <option value="ell">Greek (ell)</option>
+            </select>
           </label>
           <button id="renderBtn" class="primary">Render & OCR</button>
         </div>
@@ -42,7 +55,12 @@
           </label>
           <label class="field">
             <span>Image model</span>
-            <input id="imageModel" type="text" value="gpt-image-1.5" />
+            <select id="imageModel">
+              <option value="gpt-image-2" selected>GPT Image 2 - latest / highest quality</option>
+              <option value="gpt-image-1.5">GPT Image 1.5 - balanced</option>
+              <option value="gpt-image-1">GPT Image 1 - legacy</option>
+              <option value="gpt-image-1-mini">GPT Image 1 mini - lower cost</option>
+            </select>
           </label>
           <label class="field">
             <span>Output size</span>

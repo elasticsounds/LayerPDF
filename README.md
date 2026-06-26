@@ -32,12 +32,13 @@ Then open:
 http://localhost:4173/
 ```
 
-## OpenAI Key Handling
+## API Key Handling
 
 For GitHub Pages, the app runs entirely in the browser. Users paste their own
-OpenAI API key, and requests are sent directly from their browser to the Images
-API. This is convenient for a local/internal tool, but browser-side API keys are
-inherently inspectable. Do not paste a key on a shared or untrusted computer.
+OpenAI and optional Gemini API keys, and requests are sent directly from their
+browser to those APIs. This is convenient for a local/internal tool, but
+browser-side API keys are inherently inspectable. Do not paste a key on a shared
+or untrusted computer.
 
 For a public production app, use a backend or Netlify/Vercel function that
 proxies image edit requests and applies your own auth, rate limits, logging, and
@@ -47,14 +48,16 @@ spend controls.
 
 1. Upload a scanned PDF.
 2. Choose the story page range.
-3. Choose the OCR language. The picker includes the full practical Tesseract
+3. Choose the OCR engine. Browser Tesseract runs fully locally; Gemini vision
+   OCR uses a Gemini API key to detect story text and boxes from the page image.
+4. Choose the OCR language. The picker includes the full practical Tesseract
    traineddata language set, and Albanian uses the `sqi` language model.
-4. Tune the OCR confidence, white backing filter, and optional text size
+5. Tune the OCR confidence, white backing filter, and optional text size
    override when illustrated backgrounds create false text boxes.
-5. Run **Render & OCR**.
-6. Drag/edit text boxes in the review screen.
-7. Run **Remove Burned-In Text**.
-8. Export a layered PDF or editable PowerPoint.
+6. Run **Render & OCR**.
+7. Drag/edit text boxes in the review screen.
+8. Run **Remove Burned-In Text**.
+9. Export a layered PDF or editable PowerPoint.
 
 ## Notes
 
@@ -62,6 +65,9 @@ spend controls.
   text, and simple text regions.
 - The OCR language field accepts raw Tesseract codes, so you can combine
   languages with `+` such as `eng+sqi`.
+- Gemini OCR sends each rendered page image to Gemini and asks for exact story
+  text lines with normalized bounding boxes. It is useful when Tesseract misses
+  illustrated or low-contrast pages.
 - OCR filtering rejects low-confidence lines, oversized boxes, tiny fragments,
   non-text-like strings, and optional non-white-backed regions.
 - Detected text sizes are normalized across the processed batch unless a text

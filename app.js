@@ -147,8 +147,11 @@ const OCR_LANGUAGES = [
 const els = {
   pdfInput: $("pdfInput"),
   pageRange: $("pageRange"),
+  ocrEngine: $("ocrEngine"),
   ocrLang: $("ocrLang"),
   ocrLangOptions: $("ocrLangOptions"),
+  geminiApiKey: $("geminiApiKey"),
+  geminiModel: $("geminiModel"),
   minConfidence: $("minConfidence"),
   requireLightArea: $("requireLightArea"),
   fontSizeOverride: $("fontSizeOverride"),
@@ -278,7 +281,13 @@ async function renderAndOcr() {
     state.pages.push(pageState);
     renderPageCard(pageState);
     setStatus(`OCR page ${pageNumber}...`, (i / pages.length) * 50 + 20);
-    const ocr = await ocrLines(rendered.canvas, pageState.width, pageState.height);
+    let ocr;
+    try {
+      ocr = await ocrLines(rendered.canvas, pageState.width, pageState.height);
+    } catch (error) {
+      setStatus(`OCR failed on page ${pageNumber}: ${error.message}`, ((i + 1) / pages.length) * 70);
+      return;
+    }
     pageState.lines = ocr.lines;
     pageState.ocrStats = ocr.stats;
     if (pageState.lines.length === 0) {
@@ -286,7 +295,7 @@ async function renderAndOcr() {
     }
     refreshPageCard(pageState);
     setStatus(
-      `Processed page ${pageNumber}: kept ${pageState.ocrStats.kept} of ${pageState.ocrStats.total} OCR lines.`,
+      `Processed page ${pageNumber} with ${pageState.ocrStats.engine}: kept ${pageState.ocrStats.kept} of ${pageState.ocrStats.total} OCR lines.`,
       ((i + 1) / pages.length) * 70,
     );
   }
@@ -319,6 +328,13 @@ async function renderPdfPage(pageNumber) {
 }
 
 async function ocrLines(canvas, width, height) {
+  if (els.ocrEngine.value === "gemini") {
+    return geminiOcrLines(canvas, width, height);
+  }
+  return tesseractOcrLines(canvas, width, height);
+}
+
+async function tesseractOcrLines(canvas, width, height) {
   const lang = els.ocrLang.value.trim() || "sqi";
   const settings = getOcrSettings();
   const context = canvas.getContext("2d", { willReadFrequently: true });
@@ -362,9 +378,153 @@ async function ocrLines(canvas, width, height) {
       total: rawLines.length,
       kept: lines.length,
       rejected: rawLines.length - lines.length,
+      engine: "Tesseract",
       minConfidence: settings.minConfidence,
     },
   };
+}
+
+async function geminiOcrLines(canvas, width, height) {
+  const apiKey = els.geminiApiKey.value.trim();
+  if (!apiKey) {
+    throw new Error("enter a Gemini API key or switch OCR engine back to Tesseract.");
+  }
+  const model = els.geminiModel.value.trim() || "gemini-3.5-flash";
+  const imageData = canvas.toDataURL("image/jpeg", 0.9).split(",")[1];
+  const response = await fetch("https://generativelanguage.googleapis.com/v1beta/interactions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      model,
+      input: [
+        { type: "text", text: geminiOcrPrompt() },
+        {
+          type: "image",
+          data: imageData,
+          mime_type: "image/jpeg",
+        },
+      ],
+      response_format: {
+        type: "text",
+        mime_type: "application/json",
+        schema: geminiOcrSchema(),
+      },
+    }),
+  });
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`Gemini OCR failed: ${message}`);
+  }
+  const json = await response.json();
+  const payload = parseJsonResponse(readGeminiOutputText(json));
+  const rawLines = Array.isArray(payload.lines) ? payload.lines : [];
+  const lines = rawLines
+    .map((line, index) => geminiLineToOverlay(line, index))
+    .filter(Boolean);
+  return {
+    lines,
+    stats: {
+      total: rawLines.length,
+      kept: lines.length,
+      rejected: rawLines.length - lines.length,
+      engine: "Gemini",
+      minConfidence: null,
+    },
+  };
+}
+
+function geminiOcrPrompt() {
+  const language = els.ocrLang.value.trim() || "sqi";
+  return `You are an OCR engine for illustrated children's storybook pages.
+
+Return JSON only. Detect only visible story text intended for reading aloud.
+Preserve the original language and diacritics exactly. The requested OCR language code is "${language}".
+Do not translate, summarize, correct, or invent missing text.
+Ignore page numbers, decorative marks, illustration line art, rain/snow/texture, character clothing, background details, and uncertain guesses.
+Merge words that belong to the same visual line. Do not split a single line into individual words.
+For each detected story text line, return:
+- text: exact visible text
+- box_2d: [ymin, xmin, ymax, xmax] tightly around the printed characters, normalized from 0 to 1000
+- confidence: number from 0 to 100
+If there is no story text, return {"lines":[]}.`;
+}
+
+function geminiOcrSchema() {
+  return {
+    type: "object",
+    properties: {
+      lines: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            box_2d: {
+              type: "array",
+              items: { type: "number" },
+            },
+            confidence: { type: "number" },
+          },
+          required: ["text", "box_2d"],
+        },
+      },
+    },
+    required: ["lines"],
+  };
+}
+
+function geminiLineToOverlay(line, index) {
+  const text = String(line.text ?? "").replace(/\s+/g, " ").trim();
+  const box = Array.isArray(line.box_2d) ? line.box_2d.map(Number) : null;
+  if (!text || !box || box.length !== 4 || box.some((value) => !Number.isFinite(value))) return null;
+  const [ymin, xmin, ymax, xmax] = box.map((value) => clamp(value, 0, 1000));
+  const left = xmin / 10;
+  const top = ymin / 10;
+  const w = Math.max(5, (xmax - xmin) / 10);
+  const h = Math.max(2.4, (ymax - ymin) / 10);
+  const confidenceValue = Number(line.confidence);
+  const confidence = Number.isFinite(confidenceValue)
+    ? clamp(confidenceValue <= 1 ? confidenceValue * 100 : confidenceValue, 0, 100)
+    : 90;
+  const textMetrics = measureTextQuality(text);
+  if (textMetrics.letters < 2) return null;
+  if (w > 95 || h > 14) return null;
+  return {
+    id: `gemini-line-${index + 1}`,
+    text,
+    left,
+    top,
+    width: w,
+    height: h,
+    rawWidth: w,
+    rawHeight: h,
+    rawFontSize: clamp(h * 0.92, 2.2, 5.2),
+    fontSize: clamp(h * 0.92, 2.2, 5.2),
+    confidence,
+    textMetrics,
+    lightRatio: 1,
+    color: "#a85652",
+  };
+}
+
+function readGeminiOutputText(json) {
+  if (typeof json.output_text === "string") return json.output_text;
+  if (typeof json.outputText === "string") return json.outputText;
+  const candidateText = json.candidates?.[0]?.content?.parts
+    ?.map((part) => part.text ?? "")
+    .join("");
+  if (candidateText) return candidateText;
+  throw new Error("Gemini response did not include output text.");
+}
+
+function parseJsonResponse(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return {};
+  const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  return JSON.parse(fenced ? fenced[1] : trimmed);
 }
 
 function getOcrSettings() {
@@ -504,7 +664,7 @@ function refreshPageCard(pageState) {
   if (!node) return;
   const title = node.querySelector(".page-title");
   if (pageState.ocrStats) {
-    title.textContent = `Page ${pageState.pageNumber} · ${pageState.ocrStats.kept}/${pageState.ocrStats.total} OCR lines`;
+    title.textContent = `Page ${pageState.pageNumber} · ${pageState.ocrStats.engine} ${pageState.ocrStats.kept}/${pageState.ocrStats.total}`;
   } else {
     title.textContent = `Page ${pageState.pageNumber}`;
   }

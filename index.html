@@ -28,11 +28,26 @@
             <input id="pageRange" type="text" placeholder="All, or 6-23" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
           </label>
           <label class="field">
+            <span>OCR engine</span>
+            <select id="ocrEngine">
+              <option value="tesseract" selected>Browser Tesseract</option>
+              <option value="gemini">Gemini vision OCR</option>
+            </select>
+          </label>
+          <label class="field">
             <span>OCR language</span>
             <input id="ocrLang" list="ocrLangOptions" value="sqi" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
             <datalist id="ocrLangOptions"></datalist>
           </label>
           <p class="hint">Search by name or type a Tesseract code. Combine languages with +, e.g. eng+sqi.</p>
+          <label class="field">
+            <span>Gemini API key</span>
+            <input id="geminiApiKey" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="AIza..." data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+          </label>
+          <label class="field">
+            <span>Gemini model</span>
+            <input id="geminiModel" type="text" value="gemini-3.5-flash" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+          </label>
           <div class="field-grid">
             <label class="field">
               <span>Min confidence</span>

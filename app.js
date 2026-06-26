@@ -646,18 +646,51 @@ function geminiLineToOverlay(line, index) {
 function readGeminiOutputText(json) {
   if (typeof json.output_text === "string") return json.output_text;
   if (typeof json.outputText === "string") return json.outputText;
+  const stepText = readGeminiStepText(json);
+  if (stepText) return stepText;
   const candidateText = json.candidates?.[0]?.content?.parts
     ?.map((part) => part.text ?? "")
     .join("");
   if (candidateText) return candidateText;
-  throw new Error("Gemini response did not include output text.");
+  throw new Error(`Gemini response did not include output text. Response keys: ${Object.keys(json).join(", ")}`);
+}
+
+function readGeminiStepText(json) {
+  const steps = Array.isArray(json.steps) ? json.steps : [];
+  for (let index = steps.length - 1; index >= 0; index -= 1) {
+    const step = steps[index];
+    const text =
+      readContentText(step?.content) ||
+      readContentText(step?.modelOutput?.content) ||
+      readContentText(step?.model_output?.content);
+    if (text) return text;
+  }
+  return "";
+}
+
+function readContentText(content) {
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((part) => {
+      if (typeof part?.text === "string") return part.text;
+      if (typeof part?.text?.text === "string") return part.text.text;
+      if (typeof part?.text?.value === "string") return part.text.value;
+      return "";
+    })
+    .join("")
+    .trim();
 }
 
 function parseJsonResponse(text) {
   const trimmed = String(text ?? "").trim();
   if (!trimmed) return {};
   const fenced = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-  return JSON.parse(fenced ? fenced[1] : trimmed);
+  const jsonText = fenced ? fenced[1] : trimmed;
+  try {
+    return JSON.parse(jsonText);
+  } catch (error) {
+    throw new Error(`Gemini returned non-JSON OCR output: ${jsonText.slice(0, 220)}`);
+  }
 }
 
 function getOcrSettings() {

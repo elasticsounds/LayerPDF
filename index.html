@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LayerPDF</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="sidebar" aria-label="Controls">
+        <div class="brand">
+          <div class="mark">SL</div>
+          <div>
+            <h1>LayerPDF</h1>
+            <p>Turn flattened storybook PDFs into layered PDFs and editable decks.</p>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>1. Source</h2>
+          <label class="field">
+            <span>Scanned PDF</span>
+            <input id="pdfInput" type="file" accept="application/pdf" />
+          </label>
+          <label class="field">
+            <span>Pages</span>
+            <input id="pageRange" type="text" placeholder="All, or 6-23" />
+          </label>
+          <label class="field">
+            <span>OCR language</span>
+            <input id="ocrLang" type="text" value="eng" />
+          </label>
+          <button id="renderBtn" class="primary">Render & OCR</button>
+        </div>
+
+        <div class="panel">
+          <h2>2. Clean Images</h2>
+          <label class="field">
+            <span>OpenAI API key</span>
+            <input id="apiKey" type="password" autocomplete="off" placeholder="sk-..." />
+          </label>
+          <label class="field">
+            <span>Image model</span>
+            <input id="imageModel" type="text" value="gpt-image-1.5" />
+          </label>
+          <label class="field">
+            <span>Output size</span>
+            <select id="imageSize">
+              <option value="1024x1024">1024 x 1024</option>
+              <option value="1536x1024">1536 x 1024</option>
+              <option value="1024x1536">1024 x 1536</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Prompt</span>
+            <textarea id="editPrompt" rows="5">Remove only the visible story text inside the masked transparent areas. Preserve the illustration, paper texture, white text backing shapes, colors, page number, and all non-text artwork exactly as they are.</textarea>
+          </label>
+          <button id="cleanBtn" class="secondary">Remove Burned-In Text</button>
+          <p class="hint">The key stays in this browser session. Do not use this on a shared computer.</p>
+        </div>
+
+        <div class="panel">
+          <h2>3. Export</h2>
+          <label class="field">
+            <span>Font name</span>
+            <input id="fontName" type="text" value="Mouse Memoirs" />
+          </label>
+          <label class="field">
+            <span>Optional TTF for PDF</span>
+            <input id="fontFile" type="file" accept=".ttf,.otf,font/ttf,font/otf" />
+          </label>
+          <p class="hint">Mouse Memoirs is bundled. Upload a TTF only for another book font.</p>
+          <div class="button-row">
+            <button id="exportPdfBtn" class="primary">Layered PDF</button>
+            <button id="exportPptxBtn" class="primary">PowerPoint</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="workspace">
+        <div class="toolbar">
+          <div>
+            <h2 id="workspaceTitle">No PDF loaded</h2>
+            <p id="status">Choose a scanned storybook PDF to begin.</p>
+          </div>
+          <div class="meter" aria-label="Progress">
+            <div id="progressBar"></div>
+          </div>
+        </div>
+
+        <div id="emptyState" class="empty-state">
+          <strong>Designed for illustrated storybooks.</strong>
+          <span>Upload a PDF, OCR the text, remove only the burned-in words, then export clean image layers plus editable text.</span>
+        </div>
+
+        <div id="pageGrid" class="page-grid" aria-live="polite"></div>
+      </section>
+    </main>
+
+    <template id="pageTemplate">
+      <article class="page-card">
+        <header>
+          <strong class="page-title"></strong>
+          <div class="page-actions">
+            <button class="small use-original">Use Original</button>
+            <button class="small reclean">Clean</button>
+          </div>
+        </header>
+        <div class="page-preview">
+          <img class="page-image" alt="" />
+          <div class="overlay-layer"></div>
+        </div>
+        <details>
+          <summary>Text boxes</summary>
+          <div class="line-list"></div>
+        </details>
+      </article>
+    </template>
+
+    <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

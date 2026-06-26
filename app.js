@@ -377,15 +377,16 @@ function getOcrSettings() {
 
 function shouldKeepOcrLine(line, settings) {
   const { letters, glyphs, letterRatio } = line.textMetrics;
-  const area = line.rawWidth * line.rawHeight;
+  const textLike = letters >= 5 && letterRatio >= 0.55;
   if (line.confidence < settings.minConfidence) return false;
   if (letters < 2 || glyphs < 2) return false;
   if (glyphs <= 3 && line.confidence < Math.max(settings.minConfidence, 72)) return false;
   if (letterRatio < 0.45 && letters < 8) return false;
   if (line.rawWidth < 2 || line.rawHeight < 0.65) return false;
-  if (line.rawHeight > 8.5 || line.rawWidth > 88 || area > 5.8) return false;
-  if (settings.requireLightArea && line.lightRatio < 0.05) return false;
-  if (settings.requireLightArea && line.lightRatio < 0.16 && line.confidence < 86) return false;
+  if (line.rawHeight > 11.5 || line.rawWidth > 94) return false;
+  if (settings.requireLightArea && line.lightRatio < 0.03 && (!textLike || line.confidence < 65)) {
+    return false;
+  }
   return true;
 }
 

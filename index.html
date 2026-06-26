@@ -25,22 +25,22 @@
           </label>
           <label class="field">
             <span>Pages</span>
-            <input id="pageRange" type="text" placeholder="All, or 6-23" />
+            <input id="pageRange" type="text" placeholder="All, or 6-23" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
           </label>
           <label class="field">
             <span>OCR language</span>
-            <input id="ocrLang" list="ocrLangOptions" value="sqi" autocomplete="off" />
+            <input id="ocrLang" list="ocrLangOptions" value="sqi" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
             <datalist id="ocrLangOptions"></datalist>
           </label>
           <p class="hint">Search by name or type a Tesseract code. Combine languages with +, e.g. eng+sqi.</p>
           <div class="field-grid">
             <label class="field">
               <span>Min confidence</span>
-              <input id="minConfidence" type="number" min="0" max="100" step="1" value="55" />
+              <input id="minConfidence" type="number" min="0" max="100" step="1" value="55" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
             </label>
             <label class="field">
               <span>Text size override</span>
-              <input id="fontSizeOverride" type="number" min="0" max="12" step="0.1" placeholder="Auto" />
+              <input id="fontSizeOverride" type="number" min="0" max="12" step="0.1" placeholder="Auto" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
             </label>
           </div>
           <label class="check-field">
@@ -54,7 +54,7 @@
           <h2>2. Clean Images</h2>
           <label class="field">
             <span>OpenAI API key</span>
-            <input id="apiKey" type="password" autocomplete="off" placeholder="sk-..." />
+            <input id="apiKey" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="sk-..." data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
           </label>
           <label class="field">
             <span>Image model</span>
@@ -75,7 +75,7 @@
           </label>
           <label class="field">
             <span>Prompt</span>
-            <textarea id="editPrompt" rows="5">Remove only the visible story text inside the masked transparent areas. Preserve the illustration, paper texture, white text backing shapes, colors, page number, and all non-text artwork exactly as they are.</textarea>
+            <textarea id="editPrompt" rows="5" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other">Remove only the visible story text inside the masked transparent areas. Preserve the illustration, paper texture, white text backing shapes, colors, page number, and all non-text artwork exactly as they are.</textarea>
           </label>
           <button id="cleanBtn" class="secondary">Remove Burned-In Text</button>
           <p class="hint">The key stays in this browser session. Do not use this on a shared computer.</p>
@@ -85,7 +85,7 @@
           <h2>3. Export</h2>
           <label class="field">
             <span>Font name</span>
-            <input id="fontName" type="text" value="Mouse Memoirs" />
+            <input id="fontName" type="text" value="Mouse Memoirs" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
           </label>
           <label class="field">
             <span>Optional TTF for PDF</span>

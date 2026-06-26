@@ -579,9 +579,9 @@ function updateLineList(pageState) {
     const row = document.createElement("div");
     row.className = "line-row";
     row.innerHTML = `
-      <input aria-label="Text" value="${escapeAttr(line.text)}" />
-      <input aria-label="Left" type="number" step="0.1" value="${line.left.toFixed(1)}" />
-      <input aria-label="Top" type="number" step="0.1" value="${line.top.toFixed(1)}" />
+      <input aria-label="Text" value="${escapeAttr(line.text)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+      <input aria-label="Left" type="number" step="0.1" value="${line.left.toFixed(1)}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+      <input aria-label="Top" type="number" step="0.1" value="${line.top.toFixed(1)}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
       <span class="confidence" title="OCR confidence">${Math.round(line.confidence ?? 0)}%</span>
     `;
     const [textInput, leftInput, topInput] = row.querySelectorAll("input");

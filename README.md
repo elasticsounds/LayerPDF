@@ -57,7 +57,7 @@ spend controls.
    override when illustrated backgrounds create false text boxes.
 6. Run **Render & OCR**.
 7. Drag/edit text boxes in the review screen.
-8. Run **Remove Burned-In Text**.
+8. Choose a cleanup mode and run **Remove Burned-In Text**.
 9. Export a layered PDF or editable PowerPoint.
 
 ## Notes
@@ -76,9 +76,14 @@ spend controls.
   non-text-like strings, and optional non-white-backed regions.
 - Detected text sizes are normalized across the processed batch unless a text
   size override is provided.
+- Cleanup mode defaults to **Local white repaint**, which uses canvas sampling
+  to cover detected text without calling any image API. Use **OpenAI image edit**
+  only for pages where text crosses detailed artwork.
+- OpenAI image edit failures are page-scoped: blocked or failed pages are
+  skipped instead of stopping the whole batch.
 - The image model dropdown includes `gpt-image-2`, `gpt-image-1.5`,
-  `gpt-image-1`, and `gpt-image-1-mini`. Choose a lower-cost model when image
-  cleanup quality is less important.
+  `gpt-image-1`, and `gpt-image-1-mini`. Choose a lower-cost model and low
+  quality when image cleanup quality is less important.
 - Albanian OCR is supported through Tesseract's `sqi.traineddata` model.
 - OCR is only a first pass. Manual text correction and placement review are part
   of the intended workflow.

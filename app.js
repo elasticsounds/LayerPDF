@@ -161,9 +161,11 @@ const els = {
   minConfidence: $("minConfidence"),
   requireLightArea: $("requireLightArea"),
   fontSizeOverride: $("fontSizeOverride"),
+  cleanupMode: $("cleanupMode"),
   apiKey: $("apiKey"),
   imageModel: $("imageModel"),
   imageSize: $("imageSize"),
+  imageQuality: $("imageQuality"),
   editPrompt: $("editPrompt"),
   fontName: $("fontName"),
   fontFile: $("fontFile"),
@@ -238,9 +240,11 @@ function persistentFields() {
     els.minConfidence,
     els.requireLightArea,
     els.fontSizeOverride,
+    els.cleanupMode,
     els.apiKey,
     els.imageModel,
     els.imageSize,
+    els.imageQuality,
     els.editPrompt,
     els.fontName,
   ].filter(Boolean);
@@ -929,25 +933,136 @@ function updateLineList(pageState) {
 }
 
 async function cleanPages(pages) {
-  const apiKey = els.apiKey.value.trim();
-  if (!apiKey) {
-    setStatus("Enter an OpenAI API key first.");
-    return;
-  }
   if (pages.length === 0) {
     setStatus("Render pages first.");
     return;
   }
+  const mode = els.cleanupMode.value || "local";
+  const apiKey = els.apiKey.value.trim();
+  if ((mode === "openai" || mode === "auto") && !apiKey) {
+    setStatus("Enter an OpenAI API key or switch Cleanup mode to Local white repaint.");
+    return;
+  }
+  let failed = 0;
   for (let i = 0; i < pages.length; i += 1) {
     const page = pages[i];
-    setStatus(`Cleaning page ${page.pageNumber}...`, (i / pages.length) * 100);
-    const imageBlob = await dataUrlToBlob(page.imageDataUrl);
-    const maskBlob = await createMaskBlob(page);
-    const cleaned = await callImageEdit(apiKey, imageBlob, maskBlob);
-    page.cleanDataUrl = cleaned;
-    refreshPageCard(page);
-    setStatus(`Cleaned page ${page.pageNumber}.`, ((i + 1) / pages.length) * 100);
+    setStatus(`Cleaning page ${page.pageNumber} with ${cleanupModeLabel(mode)}...`, (i / pages.length) * 100);
+    try {
+      page.cleanDataUrl = await cleanPage(page, mode, apiKey);
+      refreshPageCard(page);
+      setStatus(`Cleaned page ${page.pageNumber}.`, ((i + 1) / pages.length) * 100);
+    } catch (error) {
+      failed += 1;
+      page.cleanDataUrl = page.cleanDataUrl || page.imageDataUrl;
+      refreshPageCard(page);
+      setStatus(`Skipped page ${page.pageNumber}: ${summarizeError(error)}`, ((i + 1) / pages.length) * 100);
+    }
   }
+  if (failed > 0) {
+    setStatus(`Finished with ${failed} page${failed === 1 ? "" : "s"} skipped. Try Local white repaint for blocked pages.`, 100);
+  }
+}
+
+async function cleanPage(page, mode, apiKey) {
+  if (mode === "local") return locallyRepaintText(page);
+  if (mode === "openai") return openAiCleanPage(page, apiKey);
+  const local = await locallyRepaintText(page);
+  try {
+    return await openAiCleanPage(page, apiKey);
+  } catch {
+    return local;
+  }
+}
+
+async function openAiCleanPage(page, apiKey) {
+  const imageBlob = await dataUrlToBlob(page.imageDataUrl);
+  const maskBlob = await createMaskBlob(page);
+  return callImageEdit(apiKey, imageBlob, maskBlob);
+}
+
+async function locallyRepaintText(page) {
+  const image = await loadImage(page.imageDataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = page.width;
+  canvas.height = page.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0, page.width, page.height);
+  const imageData = ctx.getImageData(0, 0, page.width, page.height);
+  for (const line of page.lines) {
+    const rect = paddedLineRect(page, line);
+    const fill = sampleLocalFill(imageData, page.width, page.height, rect);
+    ctx.save();
+    ctx.fillStyle = fill;
+    ctx.shadowColor = fill;
+    ctx.shadowBlur = Math.max(2, rect.h * 0.08);
+    roundRect(ctx, rect.x, rect.y, rect.w, rect.h, Math.max(8, rect.h * 0.28));
+    ctx.fill();
+    ctx.restore();
+  }
+  return canvas.toDataURL("image/png");
+}
+
+function paddedLineRect(page, line) {
+  const padX = page.width * 0.012;
+  const padY = page.height * 0.008;
+  const x = (line.left / 100) * page.width - padX;
+  const y = (line.top / 100) * page.height - padY;
+  const w = (line.width / 100) * page.width + padX * 2;
+  const h = (line.height / 100) * page.height + padY * 2;
+  return {
+    x: clamp(x, 0, page.width),
+    y: clamp(y, 0, page.height),
+    w: clamp(w, 1, page.width - clamp(x, 0, page.width)),
+    h: clamp(h, 1, page.height - clamp(y, 0, page.height)),
+  };
+}
+
+function sampleLocalFill(imageData, width, height, rect) {
+  const samples = [];
+  const x0 = clamp(Math.floor(rect.x), 0, width - 1);
+  const y0 = clamp(Math.floor(rect.y), 0, height - 1);
+  const x1 = clamp(Math.ceil(rect.x + rect.w), x0 + 1, width);
+  const y1 = clamp(Math.ceil(rect.y + rect.h), y0 + 1, height);
+  const margin = Math.max(3, Math.round(Math.min(rect.w, rect.h) * 0.2));
+  const samplePixel = (x, y) => {
+    const offset = (y * width + x) * 4;
+    const r = imageData.data[offset];
+    const g = imageData.data[offset + 1];
+    const b = imageData.data[offset + 2];
+    const brightness = (r + g + b) / 3;
+    if (brightness > 165) samples.push([r, g, b]);
+  };
+  for (let i = 0; i < 28; i += 1) {
+    const x = Math.floor(x0 + ((x1 - x0 - 1) * i) / 27);
+    samplePixel(x, clamp(y0 - margin, 0, height - 1));
+    samplePixel(x, clamp(y1 + margin, 0, height - 1));
+  }
+  for (let i = 0; i < 12; i += 1) {
+    const y = Math.floor(y0 + ((y1 - y0 - 1) * i) / 11);
+    samplePixel(clamp(x0 - margin, 0, width - 1), y);
+    samplePixel(clamp(x1 + margin, 0, width - 1), y);
+  }
+  const color = medianColor(samples.length > 0 ? samples : [[248, 248, 246]]);
+  return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
+}
+
+function medianColor(samples) {
+  return [0, 1, 2].map((channel) => {
+    const values = samples.map((sample) => sample[channel]).sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)];
+  });
+}
+
+function cleanupModeLabel(mode) {
+  if (mode === "openai") return "OpenAI image edit";
+  if (mode === "auto") return "local/OpenAI auto";
+  return "local repaint";
+}
+
+function summarizeError(error) {
+  const message = String(error?.message ?? error);
+  const parsed = message.match(/"message"\s*:\s*"([^"]+)"/);
+  return parsed?.[1] ?? message.slice(0, 180);
 }
 
 async function createMaskBlob(page) {
@@ -978,7 +1093,7 @@ async function callImageEdit(apiKey, imageBlob, maskBlob) {
   form.append("mask", maskBlob, "mask.png");
   form.append("prompt", els.editPrompt.value.trim());
   form.append("size", els.imageSize.value);
-  form.append("quality", "medium");
+  form.append("quality", els.imageQuality.value || "low");
   const response = await fetch("https://api.openai.com/v1/images/edits", {
     method: "POST",
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -1118,6 +1233,15 @@ function blobToDataUrl(blob) {
     reader.onerror = reject;
     reader.onload = () => resolve(String(reader.result));
     reader.readAsDataURL(blob);
+  });
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
   });
 }
 

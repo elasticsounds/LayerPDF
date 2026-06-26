@@ -68,6 +68,14 @@
         <div class="panel">
           <h2>2. Clean Images</h2>
           <label class="field">
+            <span>Cleanup mode</span>
+            <select id="cleanupMode">
+              <option value="local" selected>Local white repaint</option>
+              <option value="openai">OpenAI image edit</option>
+              <option value="auto">Auto local, OpenAI fallback</option>
+            </select>
+          </label>
+          <label class="field">
             <span>OpenAI API key</span>
             <input id="apiKey" type="password" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="sk-..." data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
           </label>
@@ -86,6 +94,14 @@
               <option value="1024x1024">1024 x 1024</option>
               <option value="1536x1024">1536 x 1024</option>
               <option value="1024x1536">1024 x 1536</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>OpenAI quality</span>
+            <select id="imageQuality">
+              <option value="low" selected>Low - fastest draft</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
             </select>
           </label>
           <label class="field">

@@ -12,6 +12,12 @@ const state = {
   bundledFontBase64: null,
 };
 
+const SETTINGS_KEY = "layerpdf.settings.v1";
+const DB_NAME = "layerpdf";
+const DB_VERSION = 1;
+const PDF_STORE = "files";
+const LAST_PDF_ID = "lastPdf";
+
 const OCR_LANGUAGES = [
   ["afr", "Afrikaans"],
   ["amh", "Amharic"],
@@ -176,6 +182,11 @@ const els = {
 els.pdfInput.addEventListener("change", () => {
   state.pdfFile = els.pdfInput.files?.[0] ?? null;
   els.workspaceTitle.textContent = state.pdfFile ? state.pdfFile.name : "No PDF loaded";
+  if (state.pdfFile) {
+    saveLastPdf(state.pdfFile).catch(() => {
+      setStatus("PDF loaded, but this browser could not save it for refresh.");
+    });
+  }
 });
 
 els.fontFile.addEventListener("change", async () => {
@@ -195,6 +206,7 @@ els.fontSizeOverride.addEventListener("change", () => {
 });
 
 populateOcrLanguages();
+initializePersistence();
 loadBundledFont();
 
 function populateOcrLanguages() {
@@ -208,6 +220,127 @@ function populateOcrLanguages() {
     option.label = `${name} (${code})`;
     els.ocrLangOptions.appendChild(option);
   }
+}
+
+function initializePersistence() {
+  restoreSettings();
+  bindPersistentSettings();
+  restoreLastPdf();
+}
+
+function persistentFields() {
+  return [
+    els.pageRange,
+    els.ocrEngine,
+    els.ocrLang,
+    els.geminiApiKey,
+    els.geminiModel,
+    els.minConfidence,
+    els.requireLightArea,
+    els.fontSizeOverride,
+    els.apiKey,
+    els.imageModel,
+    els.imageSize,
+    els.editPrompt,
+    els.fontName,
+  ].filter(Boolean);
+}
+
+function restoreSettings() {
+  let settings = {};
+  try {
+    settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+  } catch {
+    settings = {};
+  }
+  for (const field of persistentFields()) {
+    if (!(field.id in settings)) continue;
+    if (field.type === "checkbox") {
+      field.checked = Boolean(settings[field.id]);
+    } else {
+      field.value = String(settings[field.id] ?? "");
+    }
+  }
+}
+
+function bindPersistentSettings() {
+  for (const field of persistentFields()) {
+    field.addEventListener("input", saveSettings);
+    field.addEventListener("change", saveSettings);
+  }
+}
+
+function saveSettings() {
+  const settings = {};
+  for (const field of persistentFields()) {
+    settings[field.id] = field.type === "checkbox" ? field.checked : field.value;
+  }
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+async function restoreLastPdf() {
+  try {
+    const saved = await readSavedPdf();
+    if (!saved?.blob) return;
+    if (state.pdfFile) return;
+    state.pdfFile = new File([saved.blob], saved.name || "restored.pdf", {
+      type: saved.type || "application/pdf",
+      lastModified: saved.lastModified || Date.now(),
+    });
+    els.workspaceTitle.textContent = state.pdfFile.name;
+    setStatus(`Restored ${state.pdfFile.name}. Run Render & OCR when ready.`);
+  } catch {
+    setStatus("Saved settings restored. Choose a PDF to begin.");
+  }
+}
+
+async function saveLastPdf(file) {
+  const record = {
+    id: LAST_PDF_ID,
+    name: file.name,
+    type: file.type || "application/pdf",
+    lastModified: file.lastModified,
+    blob: file,
+  };
+  const db = await openLayerDb();
+  await putRecord(db, PDF_STORE, record);
+}
+
+async function readSavedPdf() {
+  const db = await openLayerDb();
+  return getRecord(db, PDF_STORE, LAST_PDF_ID);
+}
+
+function openLayerDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(PDF_STORE)) {
+        db.createObjectStore(PDF_STORE, { keyPath: "id" });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+function putRecord(db, storeName, record) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, "readwrite");
+    transaction.objectStore(storeName).put(record);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
+  });
+}
+
+function getRecord(db, storeName, id) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, "readonly");
+    const request = transaction.objectStore(storeName).get(id);
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
 }
 
 async function loadBundledFont() {

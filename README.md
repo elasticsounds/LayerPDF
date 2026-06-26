@@ -36,9 +36,10 @@ http://localhost:4173/
 
 For GitHub Pages, the app runs entirely in the browser. Users paste their own
 OpenAI and optional Gemini API keys, and requests are sent directly from their
-browser to those APIs. This is convenient for a local/internal tool, but
-browser-side API keys are inherently inspectable. Do not paste a key on a shared
-or untrusted computer.
+browser to those APIs. The app saves API keys and settings in browser local
+storage so refreshes keep your work. This is convenient for a local/internal
+tool, but browser-side API keys are inherently inspectable. Do not paste a key
+on a shared or untrusted computer.
 
 For a public production app, use a backend or Netlify/Vercel function that
 proxies image edit requests and applies your own auth, rate limits, logging, and
@@ -68,6 +69,9 @@ spend controls.
 - Gemini OCR sends each rendered page image to Gemini and asks for exact story
   text lines with normalized bounding boxes. It is useful when Tesseract misses
   illustrated or low-contrast pages.
+- The app persists settings in local storage and the most recent PDF in
+  IndexedDB. Browsers do not allow file inputs to be visually refilled after a
+  refresh, so the picker may look empty even when the PDF is restored.
 - OCR filtering rejects low-confidence lines, oversized boxes, tiny fragments,
   non-text-like strings, and optional non-white-backed regions.
 - Detected text sizes are normalized across the processed batch unless a text

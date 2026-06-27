@@ -53,11 +53,16 @@
               <span>Min confidence</span>
               <input id="minConfidence" type="number" min="0" max="100" step="1" value="55" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
             </label>
-            <label class="field">
-              <span>Text size override</span>
-              <input id="fontSizeOverride" type="number" min="0" max="12" step="0.1" placeholder="Auto" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
-            </label>
           </div>
+          <label class="check-field">
+            <input id="requireLightArea" type="checkbox" checked />
+            <span>White backing filter</span>
+          </label>
+          <button id="renderBtn" class="primary">Render & OCR</button>
+        </div>
+
+        <div class="panel">
+          <h2>2. Text Style</h2>
           <label class="field">
             <span>Text font</span>
             <select id="fontName">
@@ -82,15 +87,31 @@
             <span>Custom font file</span>
             <input id="fontFile" type="file" accept=".ttf,.otf,font/ttf,font/otf" />
           </label>
-          <label class="check-field">
-            <input id="requireLightArea" type="checkbox" checked />
-            <span>White backing filter</span>
-          </label>
-          <button id="renderBtn" class="primary">Render & OCR</button>
+          <div class="field-grid">
+            <label class="field">
+              <span>Text color</span>
+              <input id="textColor" type="color" value="#a85652" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+            </label>
+            <label class="field">
+              <span>Font size</span>
+              <input id="fontSizeOverride" type="number" min="0" max="12" step="0.1" placeholder="Auto" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+            </label>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span>Kerning</span>
+              <input id="letterSpacing" type="number" min="-0.5" max="1.5" step="0.01" value="0" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+            </label>
+            <label class="field">
+              <span>Line height</span>
+              <input id="lineHeight" type="number" min="0.8" max="2" step="0.05" value="1.05" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+            </label>
+          </div>
+          <p class="hint">Font size is in page-relative units. Kerning is letter spacing in the preview/export text layer.</p>
         </div>
 
         <div class="panel">
-          <h2>2. Clean Images</h2>
+          <h2>3. Clean Images</h2>
           <label class="field">
             <span>Cleanup mode</span>
             <select id="cleanupMode">
@@ -137,7 +158,7 @@
         </div>
 
         <div class="panel">
-          <h2>3. Export</h2>
+          <h2>4. Export</h2>
           <p class="hint">The selected font is used for preview and export. Upload a TTF/OTF when the PDF needs an exact custom embedded font.</p>
           <div class="button-row">
             <button id="exportPdfBtn" class="primary">Layered PDF</button>

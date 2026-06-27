@@ -179,7 +179,10 @@ const els = {
   geminiModel: $("geminiModel"),
   minConfidence: $("minConfidence"),
   requireLightArea: $("requireLightArea"),
+  textColor: $("textColor"),
   fontSizeOverride: $("fontSizeOverride"),
+  letterSpacing: $("letterSpacing"),
+  lineHeight: $("lineHeight"),
   cleanupMode: $("cleanupMode"),
   apiKey: $("apiKey"),
   imageModel: $("imageModel"),
@@ -235,6 +238,12 @@ els.fontName.addEventListener("change", () => {
   applySelectedFont();
   state.pages.forEach(refreshPageCard);
 });
+for (const field of [els.textColor, els.letterSpacing, els.lineHeight]) {
+  field.addEventListener("input", () => {
+    applyTextStyleToPages();
+    state.pages.forEach(refreshPageCard);
+  });
+}
 
 populateOcrLanguages();
 initializePersistence();
@@ -270,7 +279,10 @@ function persistentFields() {
     els.geminiModel,
     els.minConfidence,
     els.requireLightArea,
+    els.textColor,
     els.fontSizeOverride,
+    els.letterSpacing,
+    els.lineHeight,
     els.cleanupMode,
     els.apiKey,
     els.imageModel,
@@ -600,6 +612,7 @@ async function ocrLines(canvas, width, height) {
 async function tesseractOcrLines(canvas, width, height) {
   const lang = els.ocrLang.value.trim() || "sqi";
   const settings = getOcrSettings();
+  const textStyle = currentTextStyle();
   const context = canvas.getContext("2d", { willReadFrequently: true });
   const imageData = context.getImageData(0, 0, width, height);
   const result = await Tesseract.recognize(canvas, lang);
@@ -630,7 +643,9 @@ async function tesseractOcrLines(canvas, width, height) {
         confidence,
         textMetrics,
         lightRatio,
-        color: "#a85652",
+        color: textStyle.color,
+        letterSpacing: textStyle.letterSpacing,
+        lineHeight: textStyle.lineHeight,
       };
     })
     .filter(Boolean);
@@ -753,6 +768,7 @@ function geminiLineToOverlay(line, index) {
     ? clamp(confidenceValue <= 1 ? confidenceValue * 100 : confidenceValue, 0, 100)
     : 90;
   const textMetrics = measureTextQuality(text);
+  const textStyle = currentTextStyle();
   if (textMetrics.letters < 2) return null;
   if (w > 95 || h > 14) return null;
   return {
@@ -769,7 +785,9 @@ function geminiLineToOverlay(line, index) {
     confidence,
     textMetrics,
     lightRatio: 1,
-    color: "#a85652",
+    color: textStyle.color,
+    letterSpacing: textStyle.letterSpacing,
+    lineHeight: textStyle.lineHeight,
   };
 }
 
@@ -894,13 +912,39 @@ function normalizeFontSizes(pages) {
     .map((line) => line.rawFontSize)
     .filter((value) => Number.isFinite(value) && value > 0);
   const fontSize = override ?? clamp(median(detectedSizes) ?? 3.6, 2.4, 4.8);
+  const lineHeight = currentTextStyle().lineHeight;
   for (const page of pages) {
     for (const line of page.lines) {
       line.fontSize = fontSize;
-      line.height = Math.max(line.height, fontSize * 1.05);
+      line.height = Math.max(line.height, fontSize * lineHeight);
+      applyTextStyleToLine(line);
     }
   }
   return fontSize;
+}
+
+function currentTextStyle() {
+  return {
+    color: normalizeColor(els.textColor.value, "#a85652"),
+    letterSpacing: clampOptional(Number(els.letterSpacing.value), -0.5, 1.5, 0),
+    lineHeight: clampOptional(Number(els.lineHeight.value), 0.8, 2, 1.05),
+  };
+}
+
+function applyTextStyleToPages() {
+  for (const page of state.pages) {
+    for (const line of page.lines) {
+      applyTextStyleToLine(line);
+    }
+  }
+}
+
+function applyTextStyleToLine(line) {
+  const style = currentTextStyle();
+  line.color = style.color;
+  line.letterSpacing = style.letterSpacing;
+  line.lineHeight = style.lineHeight;
+  line.height = Math.max(line.rawHeight ?? line.height, line.fontSize * style.lineHeight);
 }
 
 function summarizeOcrStats(pages) {
@@ -926,7 +970,16 @@ function parseOptionalNumber(value) {
   return Number.isFinite(number) && number > 0 ? number : null;
 }
 
+function clampOptional(value, min, max, fallback) {
+  return Number.isFinite(value) ? clamp(value, min, max) : fallback;
+}
+
+function normalizeColor(value, fallback) {
+  return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
+}
+
 function defaultLine() {
+  const textStyle = currentTextStyle();
   return {
     id: `line-${crypto.randomUUID()}`,
     text: "Edit this text",
@@ -934,10 +987,13 @@ function defaultLine() {
     top: 10,
     width: 60,
     height: 5,
+    rawHeight: 5,
     rawFontSize: 4.2,
     fontSize: 4.2,
     confidence: 100,
-    color: "#a85652",
+    color: textStyle.color,
+    letterSpacing: textStyle.letterSpacing,
+    lineHeight: textStyle.lineHeight,
   };
 }
 
@@ -996,6 +1052,8 @@ function applyLineStyle(box, line) {
   box.style.height = `${line.height}%`;
   box.style.fontSize = `${line.fontSize}cqw`;
   box.style.color = line.color;
+  box.style.letterSpacing = `${line.letterSpacing ?? 0}cqw`;
+  box.style.lineHeight = String(line.lineHeight ?? 1.05);
   box.style.fontFamily = selectedFontCssStack();
 }
 
@@ -1276,6 +1334,9 @@ async function exportLayeredPdf() {
       const fontSize = (line.fontSize / 100) * page.width;
       doc.setFontSize(fontSize);
       doc.setTextColor(line.color);
+      if (typeof doc.setCharSpace === "function") {
+        doc.setCharSpace(((line.letterSpacing ?? 0) / 100) * page.width);
+      }
       const x = (line.left / 100) * page.width + ((line.width / 100) * page.width) / 2;
       const y = (line.top / 100) * page.height + fontSize;
       doc.text(line.text, x, y, {
@@ -1284,6 +1345,9 @@ async function exportLayeredPdf() {
       });
     }
   });
+  if (typeof doc.setCharSpace === "function") {
+    doc.setCharSpace(0);
+  }
   doc.save("storybook-layered.pdf");
   setStatus("Exported layered PDF.", 100);
 }
@@ -1317,6 +1381,7 @@ async function exportPowerPoint() {
     slide.background = { color: "FFFFFF" };
     slide.addImage({ data: page.cleanDataUrl, x: 0, y: 0, w: pptx.width, h: pptx.height });
     for (const line of page.lines) {
+      const charSpacing = ((line.letterSpacing ?? 0) / 100) * pptx.width * 72;
       slide.addText(line.text, {
         x: (line.left / 100) * pptx.width,
         y: (line.top / 100) * pptx.height,
@@ -1325,6 +1390,7 @@ async function exportPowerPoint() {
         fontFace,
         fontSize: Math.max(8, (line.fontSize / 100) * pptx.width * 72),
         color: line.color.replace("#", ""),
+        charSpacing,
         align: "center",
         valign: "mid",
         margin: 0,

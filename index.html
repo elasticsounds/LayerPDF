@@ -58,6 +58,30 @@
               <input id="fontSizeOverride" type="number" min="0" max="12" step="0.1" placeholder="Auto" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
             </label>
           </div>
+          <label class="field">
+            <span>Text font</span>
+            <select id="fontName">
+              <option value="Mouse Memoirs" selected>Mouse Memoirs</option>
+              <option value="Patrick Hand">Patrick Hand</option>
+              <option value="Comic Neue">Comic Neue</option>
+              <option value="Kalam">Kalam</option>
+              <option value="Short Stack">Short Stack</option>
+              <option value="Caveat">Caveat</option>
+              <option value="Gaegu">Gaegu</option>
+              <option value="Schoolbell">Schoolbell</option>
+              <option value="Architects Daughter">Architects Daughter</option>
+              <option value="Atma">Atma</option>
+              <option value="Baloo 2">Baloo 2</option>
+              <option value="Nunito">Nunito</option>
+              <option value="Andika">Andika</option>
+              <option value="Lexend">Lexend</option>
+              <option value="system-ui">System sans</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Custom font file</span>
+            <input id="fontFile" type="file" accept=".ttf,.otf,font/ttf,font/otf" />
+          </label>
           <label class="check-field">
             <input id="requireLightArea" type="checkbox" checked />
             <span>White backing filter</span>
@@ -114,15 +138,7 @@
 
         <div class="panel">
           <h2>3. Export</h2>
-          <label class="field">
-            <span>Font name</span>
-            <input id="fontName" type="text" value="Mouse Memoirs" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
-          </label>
-          <label class="field">
-            <span>Optional TTF for PDF</span>
-            <input id="fontFile" type="file" accept=".ttf,.otf,font/ttf,font/otf" />
-          </label>
-          <p class="hint">Mouse Memoirs is bundled. Upload a TTF only for another book font.</p>
+          <p class="hint">The selected font is used for preview and export. Upload a TTF/OTF when the PDF needs an exact custom embedded font.</p>
           <div class="button-row">
             <button id="exportPdfBtn" class="primary">Layered PDF</button>
             <button id="exportPptxBtn" class="primary">PowerPoint</button>

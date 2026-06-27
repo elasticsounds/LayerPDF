@@ -55,10 +55,11 @@ spend controls.
    traineddata language set, and Albanian uses the `sqi` language model.
 5. Tune the OCR confidence, white backing filter, and optional text size
    override when illustrated backgrounds create false text boxes.
-6. Run **Render & OCR**.
-7. Drag/edit text boxes in the review screen.
-8. Choose a cleanup mode and run **Remove Burned-In Text**.
-9. Export a layered PDF or editable PowerPoint.
+6. Choose a Google font or upload a custom TTF/OTF before rendering.
+7. Run **Render & OCR**.
+8. Drag/edit text boxes in the review screen.
+9. Choose a cleanup mode and run **Remove Burned-In Text**.
+10. Export a layered PDF or editable PowerPoint.
 
 ## Notes
 
@@ -76,6 +77,9 @@ spend controls.
   non-text-like strings, and optional non-white-backed regions.
 - Detected text sizes are normalized across the processed batch unless a text
   size override is provided.
+- The font picker includes storybook-friendly Google Fonts. Uploaded custom
+  TTF/OTF files are used for live preview and PDF embedding, and the most recent
+  uploaded font is saved in IndexedDB.
 - Cleanup mode defaults to **Local white repaint**, which uses canvas sampling
   to cover detected text without calling any image API. Use **OpenAI image edit**
   only for pages where text crosses detailed artwork.

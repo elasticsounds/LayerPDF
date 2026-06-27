@@ -10,6 +10,7 @@ const state = {
   pages: [],
   selectedFontBase64: null,
   bundledFontBase64: null,
+  customFontUrl: null,
 };
 
 const SETTINGS_KEY = "layerpdf.settings.v1";
@@ -17,6 +18,24 @@ const DB_NAME = "layerpdf";
 const DB_VERSION = 1;
 const PDF_STORE = "files";
 const LAST_PDF_ID = "lastPdf";
+const LAST_FONT_ID = "lastFont";
+const CUSTOM_FONT_VALUE = "Custom story font";
+
+const GOOGLE_FONT_OPTIONS = new Set([
+  "Patrick Hand",
+  "Comic Neue",
+  "Kalam",
+  "Short Stack",
+  "Caveat",
+  "Gaegu",
+  "Schoolbell",
+  "Architects Daughter",
+  "Atma",
+  "Baloo 2",
+  "Nunito",
+  "Andika",
+  "Lexend",
+]);
 
 const OCR_LANGUAGES = [
   ["afr", "Afrikaans"],
@@ -194,6 +213,12 @@ els.pdfInput.addEventListener("change", () => {
 els.fontFile.addEventListener("change", async () => {
   const file = els.fontFile.files?.[0];
   state.selectedFontBase64 = file ? await fileToBase64(file) : null;
+  if (file) {
+    registerCustomFont(file);
+    saveLastFont(file).catch(() => {
+      setStatus("Custom font loaded, but this browser could not save it for refresh.");
+    });
+  }
 });
 
 els.renderBtn.addEventListener("click", renderAndOcr);
@@ -206,10 +231,15 @@ els.fontSizeOverride.addEventListener("change", () => {
   state.pages.forEach(refreshPageCard);
   setStatus(`Updated text size to ${fontSize.toFixed(1)}.`, 100);
 });
+els.fontName.addEventListener("change", () => {
+  applySelectedFont();
+  state.pages.forEach(refreshPageCard);
+});
 
 populateOcrLanguages();
 initializePersistence();
 loadBundledFont();
+applySelectedFont();
 
 function populateOcrLanguages() {
   const sortedLanguages = [...OCR_LANGUAGES].sort((a, b) =>
@@ -228,6 +258,7 @@ function initializePersistence() {
   restoreSettings();
   bindPersistentSettings();
   restoreLastPdf();
+  restoreLastFont();
 }
 
 function persistentFields() {
@@ -251,12 +282,7 @@ function persistentFields() {
 }
 
 function restoreSettings() {
-  let settings = {};
-  try {
-    settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
-  } catch {
-    settings = {};
-  }
+  const settings = readSettings();
   for (const field of persistentFields()) {
     if (!(field.id in settings)) continue;
     if (field.type === "checkbox") {
@@ -264,6 +290,14 @@ function restoreSettings() {
     } else {
       field.value = String(settings[field.id] ?? "");
     }
+  }
+}
+
+function readSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+  } catch {
+    return {};
   }
 }
 
@@ -315,6 +349,38 @@ async function readSavedPdf() {
   return getRecord(db, PDF_STORE, LAST_PDF_ID);
 }
 
+async function restoreLastFont() {
+  try {
+    const saved = await readSavedFont();
+    if (!saved?.blob) return;
+    const file = new File([saved.blob], saved.name || "custom-font.ttf", {
+      type: saved.type || "font/ttf",
+      lastModified: saved.lastModified || Date.now(),
+    });
+    state.selectedFontBase64 = await fileToBase64(file);
+    registerCustomFont(file, { select: readSettings().fontName === CUSTOM_FONT_VALUE });
+  } catch {
+    state.selectedFontBase64 = null;
+  }
+}
+
+async function saveLastFont(file) {
+  const record = {
+    id: LAST_FONT_ID,
+    name: file.name,
+    type: file.type || "font/ttf",
+    lastModified: file.lastModified,
+    blob: file,
+  };
+  const db = await openLayerDb();
+  await putRecord(db, PDF_STORE, record);
+}
+
+async function readSavedFont() {
+  const db = await openLayerDb();
+  return getRecord(db, PDF_STORE, LAST_FONT_ID);
+}
+
 function openLayerDb() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -353,9 +419,69 @@ async function loadBundledFont() {
     if (!response.ok) return;
     const blob = await response.blob();
     state.bundledFontBase64 = await fileToBase64(blob);
+    addFontFace("Mouse Memoirs", `data:font/ttf;base64,${state.bundledFontBase64}`);
   } catch {
     state.bundledFontBase64 = null;
   }
+}
+
+function applySelectedFont() {
+  const fontName = selectedFontName();
+  if (GOOGLE_FONT_OPTIONS.has(fontName)) {
+    loadGoogleFont(fontName);
+  }
+}
+
+function selectedFontName() {
+  return els.fontName.value.trim() || "Mouse Memoirs";
+}
+
+function loadGoogleFont(fontName) {
+  const id = `google-font-${fontName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  if (document.getElementById(id)) return;
+  const link = document.createElement("link");
+  link.id = id;
+  link.rel = "stylesheet";
+  link.href = `https://fonts.googleapis.com/css2?family=${fontName.replaceAll(" ", "+")}&display=swap`;
+  document.head.appendChild(link);
+}
+
+function registerCustomFont(file, options = {}) {
+  if (state.customFontUrl) URL.revokeObjectURL(state.customFontUrl);
+  const url = URL.createObjectURL(file);
+  state.customFontUrl = url;
+  addFontFace(CUSTOM_FONT_VALUE, url);
+  ensureCustomFontOption();
+  if (options.select !== false) {
+    els.fontName.value = CUSTOM_FONT_VALUE;
+    saveSettings();
+    state.pages.forEach(refreshPageCard);
+  }
+}
+
+function ensureCustomFontOption() {
+  if ([...els.fontName.options].some((option) => option.value === CUSTOM_FONT_VALUE)) return;
+  const option = document.createElement("option");
+  option.value = CUSTOM_FONT_VALUE;
+  option.textContent = "Custom uploaded font";
+  els.fontName.appendChild(option);
+}
+
+function addFontFace(fontName, src) {
+  const id = `font-face-${fontName.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  document.getElementById(id)?.remove();
+  const style = document.createElement("style");
+  style.id = id;
+  style.textContent = `
+    @font-face {
+      font-family: "${fontName}";
+      src: url("${src}");
+      font-weight: 400;
+      font-style: normal;
+      font-display: swap;
+    }
+  `;
+  document.head.appendChild(style);
 }
 
 function setStatus(message, progress = null) {
@@ -870,7 +996,13 @@ function applyLineStyle(box, line) {
   box.style.height = `${line.height}%`;
   box.style.fontSize = `${line.fontSize}cqw`;
   box.style.color = line.color;
-  box.style.fontFamily = `"${els.fontName.value}", "Comic Sans MS", sans-serif`;
+  box.style.fontFamily = selectedFontCssStack();
+}
+
+function selectedFontCssStack() {
+  const fontName = selectedFontName();
+  if (fontName === "system-ui") return "system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  return `"${fontName.replaceAll('"', '\\"')}", "Comic Sans MS", sans-serif`;
 }
 
 function makeDraggable(box, line, pageState) {
@@ -1127,8 +1259,8 @@ async function exportLayeredPdf() {
     compress: true,
   });
 
-  const fontName = els.fontName.value.trim() || "Helvetica";
-  const fontBase64 = state.selectedFontBase64 || state.bundledFontBase64;
+  const fontName = selectedFontName();
+  const fontBase64 = pdfFontBase64(fontName);
   if (fontBase64) {
     doc.addFileToVFS("storybook-font.ttf", fontBase64);
     doc.addFont("storybook-font.ttf", fontName, "normal");
@@ -1156,6 +1288,12 @@ async function exportLayeredPdf() {
   setStatus("Exported layered PDF.", 100);
 }
 
+function pdfFontBase64(fontName) {
+  if (fontName === CUSTOM_FONT_VALUE && state.selectedFontBase64) return state.selectedFontBase64;
+  if (fontName === "Mouse Memoirs") return state.bundledFontBase64;
+  return null;
+}
+
 async function exportPowerPoint() {
   if (state.pages.length === 0) {
     setStatus("Render pages first.");
@@ -1172,7 +1310,7 @@ async function exportPowerPoint() {
   pptx.height = 10 * (state.pages[0].height / state.pages[0].width);
   pptx.author = "LayerPDF";
   pptx.subject = "Layered storybook pages";
-  const fontFace = els.fontName.value.trim() || "Mouse Memoirs";
+  const fontFace = selectedFontName();
 
   for (const page of state.pages) {
     const slide = pptx.addSlide();

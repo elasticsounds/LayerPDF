@@ -568,7 +568,7 @@ async function renderAndOcr() {
     setStatus(`OCR page ${pageNumber}...`, (i / pages.length) * 50 + 20);
     let ocr;
     try {
-      ocr = await ocrLines(rendered.canvas, pageState.width, pageState.height);
+      ocr = await ocrLines(rendered.canvas, pageState.width, pageState.height, pageNumber);
     } catch (error) {
       setStatus(`OCR failed on page ${pageNumber}: ${error.message}`, ((i + 1) / pages.length) * 70);
       return;
@@ -577,6 +577,10 @@ async function renderAndOcr() {
     pageState.ocrStats = ocr.stats;
     if (pageState.lines.length === 0) {
       pageState.lines = [defaultLine()];
+    }
+    if (els.ocrEngine.value === "native" && pageState.lines.length > 0) {
+      setStatus(`Consolidating page ${pageNumber} background from native PDF text...`, ((i + 1) / pages.length) * 65);
+      pageState.cleanDataUrl = await locallyRepaintText(pageState);
     }
     refreshPageCard(pageState);
     setStatus(
@@ -658,11 +662,155 @@ async function detectImageTiling(page) {
   };
 }
 
-async function ocrLines(canvas, width, height) {
+async function ocrLines(canvas, width, height, pageNumber) {
+  if (els.ocrEngine.value === "native") {
+    return nativePdfTextLines(pageNumber, width, height);
+  }
   if (els.ocrEngine.value === "gemini") {
     return geminiOcrLines(canvas, width, height);
   }
   return tesseractOcrLines(canvas, width, height);
+}
+
+async function nativePdfTextLines(pageNumber, width, height) {
+  const page = await state.pdf.getPage(pageNumber);
+  const viewport = page.getViewport({ scale: 1 });
+  const scale = width / viewport.width;
+  const scaled = page.getViewport({ scale });
+  const content = await page.getTextContent({ includeMarkedContent: true });
+  const textStyle = currentTextStyle();
+  const items = content.items
+    .map((item, index) => nativeTextItemToLine(item, index, scaled, width, height, textStyle, scale))
+    .filter(Boolean);
+  const dedupedItems = dedupeNativeItems(items);
+  const lines = mergeNativeTextItems(dedupedItems);
+  return {
+    lines,
+    stats: {
+      total: content.items.length,
+      kept: lines.length,
+      rejected: content.items.length - dedupedItems.length,
+      engine: "PDF text",
+      minConfidence: null,
+    },
+  };
+}
+
+function nativeTextItemToLine(item, index, viewport, width, height, textStyle, scale) {
+  const text = repairPairDuplicatedText(String(item.str ?? "").replace(/\s+/g, " ").trim());
+  if (!text) return null;
+  const transform = pdfjsLib.Util.transform(viewport.transform, item.transform);
+  const fontHeight = Math.max(1, Math.hypot(transform[2], transform[3]));
+  const itemWidth = Math.max(1, (Number(item.width) || 0) * scale);
+  const x = transform[4];
+  const y = transform[5] - fontHeight;
+  const left = (x / width) * 100;
+  const top = (y / height) * 100;
+  const w = (itemWidth / width) * 100;
+  const h = (fontHeight / height) * 100;
+  if (left > 101 || top > 101 || left + w < -1 || top + h < -1) return null;
+  return {
+    id: `native-line-${index + 1}`,
+    text,
+    left: clamp(left, 0, 100),
+    top: clamp(top, 0, 100),
+    width: Math.max(1, w),
+    height: Math.max(1.2, h),
+    rawWidth: Math.max(1, w),
+    rawHeight: Math.max(1.2, h),
+    rawFontSize: clamp(h * 0.92, 1.4, 5.2),
+    fontSize: clamp(h * 0.92, 1.4, 5.2),
+    confidence: 100,
+    textMetrics: measureTextQuality(text),
+    lightRatio: 1,
+    color: textStyle.color,
+    letterSpacing: textStyle.letterSpacing,
+    lineHeight: textStyle.lineHeight,
+  };
+}
+
+function repairPairDuplicatedText(text) {
+  return text
+    .split(/(\s+)/)
+    .map((token) => {
+      if (token.trim() === "" || token.length < 4 || token.length % 2 !== 0) return token;
+      let paired = 0;
+      for (let index = 0; index < token.length; index += 2) {
+        if (token[index] === token[index + 1]) paired += 1;
+      }
+      if (paired / (token.length / 2) < 0.85) return token;
+      let repaired = "";
+      for (let index = 0; index < token.length; index += 2) {
+        repaired += token[index];
+      }
+      return repaired;
+    })
+    .join("");
+}
+
+function dedupeNativeItems(items) {
+  const kept = [];
+  for (const item of items) {
+    const duplicate = kept.some(
+      (other) =>
+        other.text === item.text &&
+        Math.abs(other.left - item.left) < 0.35 &&
+        Math.abs(other.top - item.top) < 0.35 &&
+        overlapRatio(other, item) > 0.65,
+    );
+    if (!duplicate) kept.push(item);
+  }
+  return kept;
+}
+
+function overlapRatio(a, b) {
+  const ax1 = a.left + a.width;
+  const ay1 = a.top + a.height;
+  const bx1 = b.left + b.width;
+  const by1 = b.top + b.height;
+  const overlapWidth = Math.max(0, Math.min(ax1, bx1) - Math.max(a.left, b.left));
+  const overlapHeight = Math.max(0, Math.min(ay1, by1) - Math.max(a.top, b.top));
+  const overlap = overlapWidth * overlapHeight;
+  const minArea = Math.min(a.width * a.height, b.width * b.height);
+  return minArea > 0 ? overlap / minArea : 0;
+}
+
+function mergeNativeTextItems(items) {
+  const sorted = [...items].sort((a, b) => a.top - b.top || a.left - b.left);
+  const rows = [];
+  for (const item of sorted) {
+    const row = rows.find((candidate) => Math.abs(candidate.top - item.top) < Math.max(0.45, item.height * 0.45));
+    if (row) {
+      row.items.push(item);
+      row.top = Math.min(row.top, item.top);
+      row.bottom = Math.max(row.bottom, item.top + item.height);
+    } else {
+      rows.push({ top: item.top, bottom: item.top + item.height, items: [item] });
+    }
+  }
+  return rows.flatMap((row, rowIndex) => {
+    const rowItems = row.items.sort((a, b) => a.left - b.left);
+    const groups = [];
+    for (const item of rowItems) {
+      const current = groups[groups.length - 1];
+      const gap = current ? item.left - (current.left + current.width) : 0;
+      if (current && gap < Math.max(1.6, item.height * 0.9)) {
+        current.text = `${current.text} ${item.text}`.replace(/\s+/g, " ").trim();
+        const right = Math.max(current.left + current.width, item.left + item.width);
+        current.left = Math.min(current.left, item.left);
+        current.top = Math.min(current.top, item.top);
+        current.width = right - current.left;
+        current.height = Math.max(current.height, item.height);
+        current.rawWidth = current.width;
+        current.rawHeight = current.height;
+        current.rawFontSize = median([current.rawFontSize, item.rawFontSize]);
+        current.fontSize = current.rawFontSize;
+      } else {
+        groups.push({ ...item, id: `native-line-${rowIndex + 1}-${groups.length + 1}` });
+      }
+    }
+    return groups;
+  });
 }
 
 async function tesseractOcrLines(canvas, width, height) {

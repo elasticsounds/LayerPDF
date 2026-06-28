@@ -51,8 +51,10 @@ spend controls.
 2. Choose the story page range.
 3. Choose tile handling. Auto mode detects pages with many image fragments and
    consolidates them through a full-page render before OCR.
-4. Choose the OCR engine. Browser Tesseract runs fully locally; Gemini vision
-   OCR uses a Gemini API key to detect story text and boxes from the page image.
+4. Choose the OCR/text engine. **PDF native text** extracts positioned text from
+   the PDF for textbook-style files; Browser Tesseract runs fully locally;
+   Gemini vision OCR uses a Gemini API key to detect story text and boxes from
+   the page image.
 5. Choose the OCR language. The picker includes the full practical Tesseract
    traineddata language set, and Albanian uses the `sqi` language model.
 6. Tune the OCR confidence, white backing filter, and optional text size
@@ -73,6 +75,10 @@ spend controls.
 - Gemini OCR sends each rendered page image to Gemini and asks for exact story
   text lines with normalized bounding boxes. It is useful when Tesseract misses
   illustrated or low-contrast pages.
+- PDF native text mode is intended for textbook-style InDesign exports that
+  still contain real PDF text but have tiled images from flattened transparency.
+  It extracts positioned PDF text, repairs simple doubled text artifacts, and
+  locally repaints the rendered background behind the editable text layer.
 - Tile handling uses PDF image-paint operations to flag pages that look like
   image grids. LayerPDF already renders each page to a single full-page
   background image, so tiled scanned pages are consolidated before text cleanup.

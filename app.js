@@ -14,7 +14,7 @@ const state = {
 };
 
 const SETTINGS_KEY = "layerpdf.settings.v1";
-const SETTINGS_VERSION = 2;
+const SETTINGS_VERSION = 3;
 const DB_NAME = "layerpdf";
 const DB_VERSION = 1;
 const PDF_STORE = "files";
@@ -320,6 +320,9 @@ function restoreSettings() {
   if (!settings.settingsVersion && settings.fontName === "Mouse Memoirs") {
     settings.fontName = MATCH_BOOK_FONT_VALUE;
   }
+  if ((settings.settingsVersion ?? 1) < 3 && settings.cleanupMode === "local") {
+    settings.cleanupMode = "none";
+  }
   for (const field of persistentFields()) {
     if (!(field.id in settings)) continue;
     if (field.type === "checkbox") {
@@ -607,7 +610,7 @@ async function renderAndOcr() {
     if (pageState.lines.length === 0) {
       pageState.lines = [defaultLine()];
     }
-    if (els.ocrEngine.value === "native" && pageState.lines.length > 0) {
+    if (els.ocrEngine.value === "native" && pageState.lines.length > 0 && cleanupModeUsesLocalRepaint()) {
       setStatus(`Consolidating page ${pageNumber} background from native PDF text...`, ((i + 1) / pages.length) * 65);
       pageState.cleanDataUrl = await locallyRepaintText(pageState);
     }
@@ -1439,20 +1442,20 @@ async function cleanPages(pages) {
     setStatus("Render pages first.");
     return;
   }
-  const mode = els.cleanupMode.value || "local";
+  const mode = els.cleanupMode.value || "none";
   const apiKey = els.apiKey.value.trim();
   if ((mode === "openai" || mode === "auto") && !apiKey) {
-    setStatus("Enter an OpenAI API key or switch Cleanup mode to Local white repaint.");
+    setStatus("Enter an OpenAI API key or switch Cleanup mode to No cleanup or Local white repaint.");
     return;
   }
   let failed = 0;
   for (let i = 0; i < pages.length; i += 1) {
     const page = pages[i];
-    setStatus(`Cleaning page ${page.pageNumber} with ${cleanupModeLabel(mode)}...`, (i / pages.length) * 100);
+    setStatus(`Applying ${cleanupModeLabel(mode)} to page ${page.pageNumber}...`, (i / pages.length) * 100);
     try {
       page.cleanDataUrl = await cleanPage(page, mode, apiKey);
       refreshPageCard(page);
-      setStatus(`Cleaned page ${page.pageNumber}.`, ((i + 1) / pages.length) * 100);
+      setStatus(`Applied ${cleanupModeLabel(mode)} to page ${page.pageNumber}.`, ((i + 1) / pages.length) * 100);
     } catch (error) {
       failed += 1;
       page.cleanDataUrl = page.cleanDataUrl || page.imageDataUrl;
@@ -1466,6 +1469,7 @@ async function cleanPages(pages) {
 }
 
 async function cleanPage(page, mode, apiKey) {
+  if (mode === "none") return page.imageDataUrl;
   if (mode === "local") return locallyRepaintText(page);
   if (mode === "openai") return openAiCleanPage(page, apiKey);
   const local = await locallyRepaintText(page);
@@ -1556,9 +1560,15 @@ function medianColor(samples) {
 }
 
 function cleanupModeLabel(mode) {
+  if (mode === "none") return "no cleanup";
   if (mode === "openai") return "OpenAI image edit";
   if (mode === "auto") return "local/OpenAI auto";
   return "local repaint";
+}
+
+function cleanupModeUsesLocalRepaint() {
+  const mode = els.cleanupMode.value || "none";
+  return mode === "local" || mode === "auto";
 }
 
 function summarizeError(error) {

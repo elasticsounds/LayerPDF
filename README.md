@@ -65,7 +65,7 @@ spend controls.
    closest available web font for each line.
 8. Run **Render & OCR**.
 9. Drag/edit text boxes in the review screen.
-10. Choose a cleanup mode and run **Remove Burned-In Text**.
+10. Choose a cleanup mode and run **Apply Cleanup Mode**.
 11. Export a layered PDF or editable PowerPoint.
 
 ## Notes
@@ -102,9 +102,12 @@ spend controls.
 - Browser-side layered PDF export can only embed the bundled Mouse Memoirs font
   or a user-uploaded custom TTF/OTF. Native PDF font matches that are not
   uploaded may fall back to PDF core fonts in the exported PDF.
-- Cleanup mode defaults to **Local white repaint**, which uses canvas sampling
-  to cover detected text without calling any image API. Use **OpenAI image edit**
-  only for pages where text crosses detailed artwork.
+- Cleanup mode defaults to **No cleanup - overlay only**, which keeps the
+  original rendered page image and places editable text above it. This is useful
+  for native PDF text extraction when you do not want white repaint boxes.
+- **Local white repaint** uses canvas sampling to cover detected text without
+  calling any image API. Use **OpenAI image edit** only for pages where text
+  crosses detailed artwork.
 - OpenAI image edit failures are page-scoped: blocked or failed pages are
   skipped instead of stopping the whole batch.
 - The image model dropdown includes `gpt-image-2`, `gpt-image-1.5`,

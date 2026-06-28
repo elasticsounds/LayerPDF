@@ -126,7 +126,8 @@
           <label class="field">
             <span>Cleanup mode</span>
             <select id="cleanupMode">
-              <option value="local" selected>Local white repaint</option>
+              <option value="none" selected>No cleanup - overlay only</option>
+              <option value="local">Local white repaint</option>
               <option value="openai">OpenAI image edit</option>
               <option value="auto">Auto local, OpenAI fallback</option>
             </select>
@@ -164,7 +165,7 @@
             <span>Prompt</span>
             <textarea id="editPrompt" rows="5" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other">Remove only the visible story text inside the masked transparent areas. Preserve the illustration, paper texture, white text backing shapes, colors, page number, and all non-text artwork exactly as they are.</textarea>
           </label>
-          <button id="cleanBtn" class="secondary">Remove Burned-In Text</button>
+          <button id="cleanBtn" class="secondary">Apply Cleanup Mode</button>
           <p class="hint">The key stays in this browser session. Do not use this on a shared computer.</p>
         </div>
 

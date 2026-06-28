@@ -60,7 +60,9 @@ spend controls.
 6. Tune the OCR confidence, white backing filter, and optional text size
    override when illustrated backgrounds create false text boxes.
 7. Use the text style panel to choose font, custom TTF/OTF, color, size,
-   kerning, and line height before rendering.
+   kerning, and line height before rendering. **Match book font** is the
+   default; with PDF native text it tries to map embedded PDF font names to the
+   closest available web font for each line.
 8. Run **Render & OCR**.
 9. Drag/edit text boxes in the review screen.
 10. Choose a cleanup mode and run **Remove Burned-In Text**.
@@ -91,10 +93,15 @@ spend controls.
   non-text-like strings, and optional non-white-backed regions.
 - Detected text sizes are normalized across the processed batch unless a text
   size override is provided.
-- The text style panel includes storybook-friendly Google Fonts, custom
-  TTF/OTF upload, color, size override, kerning, and line-height controls.
-  Uploaded fonts are used for live preview and PDF embedding, and the most
-  recent uploaded font is saved in IndexedDB.
+- The text style panel includes **Match book font**, storybook-friendly Google
+  Fonts, custom TTF/OTF upload, color, size override, kerning, and line-height
+  controls. Native PDF text keeps a per-line font-family hint when possible and
+  maps common book fonts such as Poppins and Patrick Hand to Google Fonts for
+  preview and PowerPoint export. Uploaded fonts are used for live preview and
+  PDF embedding, and the most recent uploaded font is saved in IndexedDB.
+- Browser-side layered PDF export can only embed the bundled Mouse Memoirs font
+  or a user-uploaded custom TTF/OTF. Native PDF font matches that are not
+  uploaded may fall back to PDF core fonts in the exported PDF.
 - Cleanup mode defaults to **Local white repaint**, which uses canvas sampling
   to cover detected text without calling any image API. Use **OpenAI image edit**
   only for pages where text crosses detailed artwork.

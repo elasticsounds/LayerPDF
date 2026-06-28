@@ -14,14 +14,17 @@ const state = {
 };
 
 const SETTINGS_KEY = "layerpdf.settings.v1";
+const SETTINGS_VERSION = 2;
 const DB_NAME = "layerpdf";
 const DB_VERSION = 1;
 const PDF_STORE = "files";
 const LAST_PDF_ID = "lastPdf";
 const LAST_FONT_ID = "lastFont";
 const CUSTOM_FONT_VALUE = "Custom story font";
+const MATCH_BOOK_FONT_VALUE = "__match_book__";
 
 const GOOGLE_FONT_OPTIONS = new Set([
+  "Poppins",
   "Patrick Hand",
   "Comic Neue",
   "Kalam",
@@ -36,6 +39,23 @@ const GOOGLE_FONT_OPTIONS = new Set([
   "Andika",
   "Lexend",
 ]);
+
+const BOOK_FONT_MATCHES = [
+  ["patrickhand", "Patrick Hand"],
+  ["poppins", "Poppins"],
+  ["comicneue", "Comic Neue"],
+  ["kalam", "Kalam"],
+  ["shortstack", "Short Stack"],
+  ["caveat", "Caveat"],
+  ["gaegu", "Gaegu"],
+  ["schoolbell", "Schoolbell"],
+  ["architectsdaughter", "Architects Daughter"],
+  ["atma", "Atma"],
+  ["baloo", "Baloo 2"],
+  ["nunito", "Nunito"],
+  ["andika", "Andika"],
+  ["lexend", "Lexend"],
+];
 
 const OCR_LANGUAGES = [
   ["afr", "Afrikaans"],
@@ -297,6 +317,9 @@ function persistentFields() {
 
 function restoreSettings() {
   const settings = readSettings();
+  if (!settings.settingsVersion && settings.fontName === "Mouse Memoirs") {
+    settings.fontName = MATCH_BOOK_FONT_VALUE;
+  }
   for (const field of persistentFields()) {
     if (!(field.id in settings)) continue;
     if (field.type === "checkbox") {
@@ -323,7 +346,7 @@ function bindPersistentSettings() {
 }
 
 function saveSettings() {
-  const settings = {};
+  const settings = { settingsVersion: SETTINGS_VERSION };
   for (const field of persistentFields()) {
     settings[field.id] = field.type === "checkbox" ? field.checked : field.value;
   }
@@ -447,7 +470,13 @@ function applySelectedFont() {
 }
 
 function selectedFontName() {
-  return els.fontName.value.trim() || "Mouse Memoirs";
+  const value = els.fontName.value.trim();
+  if (!value || value === MATCH_BOOK_FONT_VALUE) return MATCH_BOOK_FONT_VALUE;
+  return value;
+}
+
+function fallbackFontName() {
+  return "Mouse Memoirs";
 }
 
 function loadGoogleFont(fontName) {
@@ -680,7 +709,7 @@ async function nativePdfTextLines(pageNumber, width, height) {
   const content = await page.getTextContent({ includeMarkedContent: true });
   const textStyle = currentTextStyle();
   const items = content.items
-    .map((item, index) => nativeTextItemToLine(item, index, scaled, width, height, textStyle, scale))
+    .map((item, index) => nativeTextItemToLine(item, index, scaled, width, height, textStyle, scale, content.styles))
     .filter(Boolean);
   const dedupedItems = dedupeNativeItems(items);
   const lines = mergeNativeTextItems(dedupedItems);
@@ -696,9 +725,11 @@ async function nativePdfTextLines(pageNumber, width, height) {
   };
 }
 
-function nativeTextItemToLine(item, index, viewport, width, height, textStyle, scale) {
+function nativeTextItemToLine(item, index, viewport, width, height, textStyle, scale, styles) {
   const text = repairPairDuplicatedText(String(item.str ?? "").replace(/\s+/g, " ").trim());
   if (!text) return null;
+  const fontFamily = matchPdfFontFamily(item, styles);
+  const fontWeight = matchPdfFontWeight(item, styles);
   const transform = pdfjsLib.Util.transform(viewport.transform, item.transform);
   const fontHeight = Math.max(1, Math.hypot(transform[2], transform[3]));
   const itemWidth = Math.max(1, (Number(item.width) || 0) * scale);
@@ -726,7 +757,56 @@ function nativeTextItemToLine(item, index, viewport, width, height, textStyle, s
     color: textStyle.color,
     letterSpacing: textStyle.letterSpacing,
     lineHeight: textStyle.lineHeight,
+    fontFamily,
+    fontWeight,
   };
+}
+
+function matchPdfFontFamily(item, styles) {
+  const style = styles?.[item.fontName] ?? {};
+  const candidates = [item.fontName, style.fontFamily]
+    .filter(Boolean)
+    .map(cleanPdfFontName)
+    .filter(isUsefulPdfFontName);
+  for (const candidate of candidates) {
+    const normalized = normalizeFontKey(candidate);
+    const match = BOOK_FONT_MATCHES.find(([needle]) => normalized.includes(needle));
+    if (match) {
+      loadGoogleFont(match[1]);
+      return match[1];
+    }
+  }
+  return candidates[0] ?? null;
+}
+
+function cleanPdfFontName(name) {
+  return String(name)
+    .replace(/^["']|["']$/g, "")
+    .replace(/^[A-Z]{6}\+/, "")
+    .replace(/[-_](Regular|Roman|Book|Bold|SemiBold|Medium|Light|Italic|Oblique|Black|ExtraBold)$/i, "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .trim();
+}
+
+function normalizeFontKey(name) {
+  return String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function isUsefulPdfFontName(name) {
+  const normalized = normalizeFontKey(name);
+  if (!normalized) return false;
+  if (["sansserif", "serif", "monospace"].includes(normalized)) return false;
+  if (/^gd\d+f\d+$/.test(normalized)) return false;
+  return true;
+}
+
+function matchPdfFontWeight(item, styles) {
+  const style = styles?.[item.fontName] ?? {};
+  const candidates = [style.fontFamily, item.fontName].filter(Boolean).join(" ");
+  if (/extra\s*bold|black|heavy|bold/i.test(candidates)) return 700;
+  if (/semi\s*bold|demi\s*bold|medium/i.test(candidates)) return 600;
+  if (/light|thin/i.test(candidates)) return 300;
+  return 400;
 }
 
 function repairPairDuplicatedText(text) {
@@ -794,7 +874,12 @@ function mergeNativeTextItems(items) {
     for (const item of rowItems) {
       const current = groups[groups.length - 1];
       const gap = current ? item.left - (current.left + current.width) : 0;
-      if (current && gap < Math.max(1.6, item.height * 0.9)) {
+      if (
+        current &&
+        current.fontFamily === item.fontFamily &&
+        current.fontWeight === item.fontWeight &&
+        gap < Math.max(1.6, item.height * 0.9)
+      ) {
         current.text = `${current.text} ${item.text}`.replace(/\s+/g, " ").trim();
         const right = Math.max(current.left + current.width, item.left + item.width);
         current.left = Math.min(current.left, item.left);
@@ -850,6 +935,8 @@ async function tesseractOcrLines(canvas, width, height) {
         color: textStyle.color,
         letterSpacing: textStyle.letterSpacing,
         lineHeight: textStyle.lineHeight,
+        fontFamily: fallbackFontName(),
+        fontWeight: 400,
       };
     })
     .filter(Boolean);
@@ -992,6 +1079,8 @@ function geminiLineToOverlay(line, index) {
     color: textStyle.color,
     letterSpacing: textStyle.letterSpacing,
     lineHeight: textStyle.lineHeight,
+    fontFamily: fallbackFontName(),
+    fontWeight: 400,
   };
 }
 
@@ -1198,6 +1287,8 @@ function defaultLine() {
     color: textStyle.color,
     letterSpacing: textStyle.letterSpacing,
     lineHeight: textStyle.lineHeight,
+    fontFamily: fallbackFontName(),
+    fontWeight: 400,
   };
 }
 
@@ -1263,13 +1354,25 @@ function applyLineStyle(box, line) {
   box.style.color = line.color;
   box.style.letterSpacing = `${line.letterSpacing ?? 0}cqw`;
   box.style.lineHeight = String(line.lineHeight ?? 1.05);
-  box.style.fontFamily = selectedFontCssStack();
+  box.style.fontFamily = selectedFontCssStack(line);
+  box.style.fontWeight = String(lineFontWeight(line));
 }
 
-function selectedFontCssStack() {
+function resolvedLineFontName(line = null) {
   const fontName = selectedFontName();
+  if (fontName === MATCH_BOOK_FONT_VALUE) return line?.fontFamily || fallbackFontName();
+  return fontName;
+}
+
+function selectedFontCssStack(line = null) {
+  const fontName = resolvedLineFontName(line);
   if (fontName === "system-ui") return "system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   return `"${fontName.replaceAll('"', '\\"')}", "Comic Sans MS", sans-serif`;
+}
+
+function lineFontWeight(line) {
+  const weight = Number(line?.fontWeight);
+  return Number.isFinite(weight) ? clamp(weight, 300, 700) : 400;
 }
 
 function makeDraggable(box, line, pageState) {
@@ -1526,21 +1629,18 @@ async function exportLayeredPdf() {
     compress: true,
   });
 
-  const fontName = selectedFontName();
-  const fontBase64 = pdfFontBase64(fontName);
-  if (fontBase64) {
-    doc.addFileToVFS("storybook-font.ttf", fontBase64);
-    doc.addFont("storybook-font.ttf", fontName, "normal");
-  }
+  const registeredFonts = registerPdfFonts(doc);
 
   state.pages.forEach((page, index) => {
     if (index > 0) {
       doc.addPage([page.width, page.height], page.width >= page.height ? "landscape" : "portrait");
     }
     doc.addImage(page.cleanDataUrl, "PNG", 0, 0, page.width, page.height);
-    doc.setFont(fontBase64 ? fontName : "helvetica", "normal");
     for (const line of page.lines) {
+      const lineFont = resolvedLineFontName(line);
       const fontSize = (line.fontSize / 100) * page.width;
+      const fontStyle = !registeredFonts.has(lineFont) && lineFontWeight(line) >= 600 ? "bold" : "normal";
+      doc.setFont(registeredFonts.has(lineFont) ? lineFont : "helvetica", fontStyle);
       doc.setFontSize(fontSize);
       doc.setTextColor(line.color);
       if (typeof doc.setCharSpace === "function") {
@@ -1561,10 +1661,19 @@ async function exportLayeredPdf() {
   setStatus("Exported layered PDF.", 100);
 }
 
-function pdfFontBase64(fontName) {
-  if (fontName === CUSTOM_FONT_VALUE && state.selectedFontBase64) return state.selectedFontBase64;
-  if (fontName === "Mouse Memoirs") return state.bundledFontBase64;
-  return null;
+function registerPdfFonts(doc) {
+  const registered = new Set();
+  if (state.bundledFontBase64) {
+    doc.addFileToVFS("MouseMemoirs-Regular.ttf", state.bundledFontBase64);
+    doc.addFont("MouseMemoirs-Regular.ttf", "Mouse Memoirs", "normal");
+    registered.add("Mouse Memoirs");
+  }
+  if (state.selectedFontBase64) {
+    doc.addFileToVFS("custom-story-font.ttf", state.selectedFontBase64);
+    doc.addFont("custom-story-font.ttf", CUSTOM_FONT_VALUE, "normal");
+    registered.add(CUSTOM_FONT_VALUE);
+  }
+  return registered;
 }
 
 async function exportPowerPoint() {
@@ -1583,7 +1692,6 @@ async function exportPowerPoint() {
   pptx.height = 10 * (state.pages[0].height / state.pages[0].width);
   pptx.author = "LayerPDF";
   pptx.subject = "Layered storybook pages";
-  const fontFace = selectedFontName();
 
   for (const page of state.pages) {
     const slide = pptx.addSlide();
@@ -1596,7 +1704,8 @@ async function exportPowerPoint() {
         y: (line.top / 100) * pptx.height,
         w: (line.width / 100) * pptx.width,
         h: (line.height / 100) * pptx.height,
-        fontFace,
+        fontFace: resolvedLineFontName(line),
+        bold: lineFontWeight(line) >= 600,
         fontSize: Math.max(8, (line.fontSize / 100) * pptx.width * 72),
         color: line.color.replace("#", ""),
         charSpacing,

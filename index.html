@@ -74,6 +74,14 @@
         <div class="panel">
           <h2>2. Text Style</h2>
           <label class="field">
+            <span>Saved style</span>
+            <select id="bookStyleSelect"></select>
+          </label>
+          <div class="button-row">
+            <button id="applyBookStyle" class="small">Apply Style</button>
+            <button id="saveBookStyle" class="small">Save Book Style</button>
+          </div>
+          <label class="field">
             <span>Text font</span>
             <select id="fontName">
               <option value="__match_book__" selected>Match book font</option>
@@ -215,6 +223,7 @@
         </div>
         <details>
           <summary>Text boxes</summary>
+          <div class="page-style-panel"></div>
           <div class="line-list"></div>
         </details>
       </article>

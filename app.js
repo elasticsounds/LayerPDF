@@ -11,9 +11,11 @@ const state = {
   selectedFontBase64: null,
   bundledFontBase64: null,
   customFontUrl: null,
+  textStyles: [],
 };
 
 const SETTINGS_KEY = "layerpdf.settings.v1";
+const TEXT_STYLES_KEY = "layerpdf.textStyles.v1";
 const SETTINGS_VERSION = 4;
 const DB_NAME = "layerpdf";
 const DB_VERSION = 1;
@@ -56,6 +58,8 @@ const BOOK_FONT_MATCHES = [
   ["andika", "Andika"],
   ["lexend", "Lexend"],
 ];
+
+const TEXT_STYLE_FIELDS = ["fontName", "color", "fontSize", "letterSpacing", "lineHeight", "fontWeight"];
 
 const OCR_LANGUAGES = [
   ["afr", "Afrikaans"],
@@ -210,6 +214,9 @@ const els = {
   imageSize: $("imageSize"),
   imageQuality: $("imageQuality"),
   editPrompt: $("editPrompt"),
+  bookStyleSelect: $("bookStyleSelect"),
+  applyBookStyle: $("applyBookStyle"),
+  saveBookStyle: $("saveBookStyle"),
   fontName: $("fontName"),
   fontFile: $("fontFile"),
   renderBtn: $("renderBtn"),
@@ -249,6 +256,17 @@ els.renderBtn.addEventListener("click", renderAndOcr);
 els.cleanBtn.addEventListener("click", () => cleanPages(state.pages));
 els.exportPdfBtn.addEventListener("click", exportLayeredPdf);
 els.exportPptxBtn.addEventListener("click", exportPowerPoint);
+els.applyBookStyle.addEventListener("click", () => {
+  const style = selectedSavedStyle(els.bookStyleSelect.value);
+  if (!style) {
+    setStatus("Choose a saved style first.");
+    return;
+  }
+  applyStyleToBook(style.values);
+});
+els.saveBookStyle.addEventListener("click", () => {
+  saveTextStyleFromPrompt(currentBookStyle(), "Book style");
+});
 els.fontSizeOverride.addEventListener("change", () => {
   if (state.pages.length === 0) return;
   const fontSize = normalizeFontSizes(state.pages);
@@ -269,6 +287,8 @@ for (const field of [els.textColor, els.letterSpacing, els.lineHeight]) {
 populateOcrLanguages();
 initializePersistence();
 loadBundledFont();
+restoreTextStyles();
+refreshStyleLibraryControls();
 applySelectedFont();
 
 function populateOcrLanguages() {
@@ -357,6 +377,107 @@ function saveSettings() {
     settings[field.id] = field.type === "checkbox" ? field.checked : field.value;
   }
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function restoreTextStyles() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(TEXT_STYLES_KEY) || "[]");
+    state.textStyles = Array.isArray(parsed)
+      ? parsed
+          .map((style) => ({
+            id: String(style.id || crypto.randomUUID()),
+            name: String(style.name || "Saved style").trim() || "Saved style",
+            values: sanitizeTextStyle(style.values || {}),
+          }))
+          .filter((style) => Object.keys(style.values).length > 0)
+      : [];
+  } catch {
+    state.textStyles = [];
+  }
+}
+
+function persistTextStyles() {
+  localStorage.setItem(TEXT_STYLES_KEY, JSON.stringify(state.textStyles));
+}
+
+function selectedSavedStyle(id) {
+  return state.textStyles.find((style) => style.id === id) ?? null;
+}
+
+function saveTextStyleFromPrompt(values, fallbackName) {
+  const sanitized = sanitizeTextStyle(values);
+  if (Object.keys(sanitized).length === 0) {
+    setStatus("Nothing to save in this style.");
+    return;
+  }
+  const name = window.prompt("Style name", fallbackName);
+  if (!name) return;
+  const style = {
+    id: crypto.randomUUID(),
+    name: name.trim() || fallbackName,
+    values: sanitized,
+  };
+  state.textStyles.push(style);
+  persistTextStyles();
+  refreshStyleLibraryControls(style.id);
+  setStatus(`Saved style "${style.name}".`, 100);
+}
+
+function refreshStyleLibraryControls(selectedId = "") {
+  if (els.bookStyleSelect) {
+    fillSavedStyleSelect(els.bookStyleSelect, selectedId);
+  }
+  state.pages.forEach(refreshPageCard);
+}
+
+function fillSavedStyleSelect(select, selectedId = "", inheritLabel = "Choose saved style") {
+  select.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = inheritLabel;
+  select.appendChild(placeholder);
+  for (const style of state.textStyles) {
+    const option = document.createElement("option");
+    option.value = style.id;
+    option.textContent = style.name;
+    select.appendChild(option);
+  }
+  select.value = selectedId && state.textStyles.some((style) => style.id === selectedId) ? selectedId : "";
+}
+
+function fillFontSelect(select, selectedValue = "", inheritLabel = "Inherit") {
+  select.innerHTML = "";
+  const inherit = document.createElement("option");
+  inherit.value = "";
+  inherit.textContent = inheritLabel;
+  select.appendChild(inherit);
+  for (const option of els.fontName.options) {
+    const clone = document.createElement("option");
+    clone.value = option.value;
+    clone.textContent = option.textContent;
+    select.appendChild(clone);
+  }
+  if (selectedValue) ensureSelectOption(select, selectedValue);
+  select.value = selectedValue || "";
+}
+
+function ensureSelectOption(select, value) {
+  if ([...select.options].some((option) => option.value === value)) return;
+  const option = document.createElement("option");
+  option.value = value;
+  option.textContent = value;
+  select.appendChild(option);
+}
+
+function updateStyleField(style, field, rawValue) {
+  const next = { ...(style || {}) };
+  const value = typeof rawValue === "string" ? rawValue.trim() : rawValue;
+  if (value === "" || value === null || value === undefined) {
+    delete next[field];
+    return sanitizeTextStyle(next);
+  }
+  next[field] = value;
+  return sanitizeTextStyle(next);
 }
 
 async function restoreLastPdf() {
@@ -495,6 +616,14 @@ function loadGoogleFont(fontName) {
   document.head.appendChild(link);
 }
 
+function ensureFontOption(fontName) {
+  if (!fontName || [...els.fontName.options].some((option) => option.value === fontName)) return;
+  const option = document.createElement("option");
+  option.value = fontName;
+  option.textContent = fontName;
+  els.fontName.appendChild(option);
+}
+
 function registerCustomFont(file, options = {}) {
   if (state.customFontUrl) URL.revokeObjectURL(state.customFontUrl);
   const url = URL.createObjectURL(file);
@@ -506,6 +635,7 @@ function registerCustomFont(file, options = {}) {
     saveSettings();
     state.pages.forEach(refreshPageCard);
   }
+  refreshStyleLibraryControls();
 }
 
 function ensureCustomFontOption() {
@@ -1218,7 +1348,7 @@ function normalizeFontSizes(pages) {
   for (const page of pages) {
     for (const line of page.lines) {
       line.fontSize = fontSize;
-      line.height = Math.max(line.height, fontSize * lineHeight);
+      line.height = Math.max(line.rawHeight ?? line.height, fontSize * lineHeight);
       applyTextStyleToLine(line);
     }
   }
@@ -1226,11 +1356,22 @@ function normalizeFontSizes(pages) {
 }
 
 function currentTextStyle() {
+  const style = currentBookStyle();
   return {
+    color: style.color,
+    letterSpacing: style.letterSpacing,
+    lineHeight: style.lineHeight,
+  };
+}
+
+function currentBookStyle() {
+  return sanitizeTextStyle({
+    fontName: selectedFontName(),
     color: normalizeColor(els.textColor.value, "#a85652"),
+    fontSize: parseOptionalNumber(els.fontSizeOverride.value),
     letterSpacing: clampOptional(Number(els.letterSpacing.value), -0.5, 1.5, 0),
     lineHeight: clampOptional(Number(els.lineHeight.value), 0.8, 2, 1.05),
-  };
+  });
 }
 
 function applyTextStyleToPages() {
@@ -1247,6 +1388,109 @@ function applyTextStyleToLine(line) {
   line.letterSpacing = style.letterSpacing;
   line.lineHeight = style.lineHeight;
   line.height = Math.max(line.rawHeight ?? line.height, line.fontSize * style.lineHeight);
+}
+
+function sanitizeTextStyle(style) {
+  const result = {};
+  if (!style || typeof style !== "object") return result;
+  if (typeof style.fontName === "string" && style.fontName.trim()) {
+    result.fontName = style.fontName.trim();
+  }
+  if (typeof style.color === "string" && /^#[0-9a-f]{6}$/i.test(style.color)) {
+    result.color = style.color;
+  }
+  const fontSize = Number(style.fontSize);
+  if (Number.isFinite(fontSize) && fontSize > 0) {
+    result.fontSize = clamp(fontSize, 0.4, 18);
+  }
+  const letterSpacing = Number(style.letterSpacing);
+  if (Number.isFinite(letterSpacing)) {
+    result.letterSpacing = clamp(letterSpacing, -0.5, 1.5);
+  }
+  const lineHeight = Number(style.lineHeight);
+  if (Number.isFinite(lineHeight)) {
+    result.lineHeight = clamp(lineHeight, 0.8, 2);
+  }
+  const fontWeight = Number(style.fontWeight);
+  if (Number.isFinite(fontWeight)) {
+    result.fontWeight = clamp(fontWeight, 300, 700);
+  }
+  return result;
+}
+
+function mergeTextStyles(...styles) {
+  const merged = {};
+  for (const style of styles) {
+    const sanitized = sanitizeTextStyle(style);
+    for (const field of TEXT_STYLE_FIELDS) {
+      if (sanitized[field] !== undefined) merged[field] = sanitized[field];
+    }
+  }
+  return merged;
+}
+
+function effectivePageStyle(page) {
+  return mergeTextStyles(currentBookStyle(), page?.styleOverride);
+}
+
+function effectiveLineStyle(page, line) {
+  const bookStyle = currentBookStyle();
+  const lineBase = {
+    fontName: bookStyle.fontName,
+    color: line?.color,
+    fontSize: line?.fontSize,
+    letterSpacing: line?.letterSpacing,
+    lineHeight: line?.lineHeight,
+    fontWeight: line?.fontWeight,
+  };
+  const merged = mergeTextStyles(lineBase, page?.styleOverride, line?.styleOverride);
+  if (!merged.fontName || merged.fontName === MATCH_BOOK_FONT_VALUE) {
+    merged.fontName = line?.fontFamily || fallbackFontName();
+  }
+  if (!merged.color) merged.color = normalizeColor(line?.color, "#a85652");
+  if (!Number.isFinite(merged.fontSize)) merged.fontSize = line?.fontSize ?? 3.6;
+  if (!Number.isFinite(merged.letterSpacing)) merged.letterSpacing = line?.letterSpacing ?? 0;
+  if (!Number.isFinite(merged.lineHeight)) merged.lineHeight = line?.lineHeight ?? 1.05;
+  if (!Number.isFinite(merged.fontWeight)) merged.fontWeight = line?.fontWeight ?? 400;
+  return merged;
+}
+
+function applyStyleToBook(style) {
+  const sanitized = sanitizeTextStyle(style);
+  if (sanitized.fontName) {
+    ensureFontOption(sanitized.fontName);
+    els.fontName.value = sanitized.fontName;
+  }
+  if (sanitized.color) els.textColor.value = sanitized.color;
+  if (sanitized.fontSize !== undefined) els.fontSizeOverride.value = sanitized.fontSize.toFixed(1);
+  if (sanitized.letterSpacing !== undefined) els.letterSpacing.value = String(sanitized.letterSpacing);
+  if (sanitized.lineHeight !== undefined) els.lineHeight.value = String(sanitized.lineHeight);
+  saveSettings();
+  applySelectedFont();
+  if (state.pages.length > 0) {
+    normalizeFontSizes(state.pages);
+    applyTextStyleToPages();
+    state.pages.forEach(refreshPageCard);
+  }
+  setStatus("Applied saved style to the book.", 100);
+}
+
+function applyStyleToPage(page, style) {
+  page.styleOverride = sanitizeTextStyle(style);
+  maybeLoadStyleFont(page.styleOverride);
+  refreshPageCard(page);
+}
+
+function applyStyleToLine(page, line, style) {
+  line.styleOverride = sanitizeTextStyle(style);
+  maybeLoadStyleFont(line.styleOverride);
+  refreshPageCard(page);
+}
+
+function maybeLoadStyleFont(style) {
+  if (GOOGLE_FONT_OPTIONS.has(style?.fontName)) {
+    loadGoogleFont(style.fontName);
+  }
 }
 
 function summarizeOcrStats(pages) {
@@ -1331,6 +1575,7 @@ function refreshPageCard(pageState) {
   }
   node.querySelector("summary").textContent = `Text boxes (${pageState.lines.length})`;
   node.querySelector(".page-image").src = pageState.cleanDataUrl;
+  renderPageStylePanel(pageState, node);
   const overlay = node.querySelector(".overlay-layer");
   overlay.innerHTML = "";
   for (const line of pageState.lines) {
@@ -1339,7 +1584,7 @@ function refreshPageCard(pageState) {
     box.contentEditable = "true";
     box.spellcheck = false;
     box.textContent = line.text;
-    applyLineStyle(box, line);
+    applyLineStyle(box, line, pageState);
     box.addEventListener("input", () => {
       line.text = box.textContent.trim();
       updateLineList(pageState);
@@ -1350,38 +1595,115 @@ function refreshPageCard(pageState) {
   updateLineList(pageState);
 }
 
+function renderPageStylePanel(pageState, node) {
+  const panel = node.querySelector(".page-style-panel");
+  const override = pageState.styleOverride || {};
+  const effective = effectivePageStyle(pageState);
+  panel.innerHTML = `
+    <div class="style-panel-heading">
+      <strong>Page style</strong>
+      <span>${Object.keys(override).length > 0 ? "override active" : "inherits book style"}</span>
+    </div>
+    <div class="style-actions">
+      <select class="page-saved-style" aria-label="Saved page style"></select>
+      <button class="small apply-page-style">Apply</button>
+      <button class="small capture-page-style">Use Book</button>
+      <button class="small save-page-style">Save</button>
+      <button class="small reset-page-style">Reset</button>
+    </div>
+    <div class="style-grid">
+      <label class="field">
+        <span>Font</span>
+        <select class="page-font"></select>
+      </label>
+      <label class="field">
+        <span>Color</span>
+        <input class="page-color" type="color" value="${escapeAttr(override.color || effective.color || "#a85652")}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+      </label>
+      <label class="field">
+        <span>Size</span>
+        <input class="page-size" type="number" min="0" max="18" step="0.1" placeholder="Inherit" value="${override.fontSize ?? ""}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+      </label>
+      <label class="field">
+        <span>Kerning</span>
+        <input class="page-spacing" type="number" min="-0.5" max="1.5" step="0.01" placeholder="Inherit" value="${override.letterSpacing ?? ""}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+      </label>
+      <label class="field">
+        <span>Line height</span>
+        <input class="page-line-height" type="number" min="0.8" max="2" step="0.05" placeholder="Inherit" value="${override.lineHeight ?? ""}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+      </label>
+    </div>
+  `;
+
+  const savedSelect = panel.querySelector(".page-saved-style");
+  fillSavedStyleSelect(savedSelect);
+  const fontSelect = panel.querySelector(".page-font");
+  fillFontSelect(fontSelect, override.fontName || "", "Inherit book font");
+
+  panel.querySelector(".apply-page-style").addEventListener("click", () => {
+    const style = selectedSavedStyle(savedSelect.value);
+    if (!style) return;
+    applyStyleToPage(pageState, style.values);
+  });
+  panel.querySelector(".capture-page-style").addEventListener("click", () => {
+    applyStyleToPage(pageState, currentBookStyle());
+  });
+  panel.querySelector(".save-page-style").addEventListener("click", () => {
+    saveTextStyleFromPrompt(effectivePageStyle(pageState), `Page ${pageState.pageNumber} style`);
+  });
+  panel.querySelector(".reset-page-style").addEventListener("click", () => {
+    pageState.styleOverride = {};
+    refreshPageCard(pageState);
+  });
+
+  fontSelect.addEventListener("change", () => {
+    updatePageStyleOverride(pageState, "fontName", fontSelect.value);
+  });
+  panel.querySelector(".page-color").addEventListener("input", (event) => {
+    updatePageStyleOverride(pageState, "color", event.target.value);
+  });
+  panel.querySelector(".page-size").addEventListener("change", (event) => {
+    updatePageStyleOverride(pageState, "fontSize", event.target.value);
+  });
+  panel.querySelector(".page-spacing").addEventListener("change", (event) => {
+    updatePageStyleOverride(pageState, "letterSpacing", event.target.value);
+  });
+  panel.querySelector(".page-line-height").addEventListener("change", (event) => {
+    updatePageStyleOverride(pageState, "lineHeight", event.target.value);
+  });
+}
+
+function updatePageStyleOverride(pageState, field, value) {
+  pageState.styleOverride = updateStyleField(pageState.styleOverride || {}, field, value);
+  maybeLoadStyleFont(pageState.styleOverride);
+  refreshPageCard(pageState);
+}
+
 function pageCard(pageState) {
   return els.pageGrid.querySelector(`[data-page="${pageState.pageNumber}"]`);
 }
 
-function applyLineStyle(box, line) {
+function applyLineStyle(box, line, pageState) {
+  const style = effectiveLineStyle(pageState, line);
   box.style.left = `${line.left}%`;
   box.style.top = `${line.top}%`;
   box.style.width = `${line.width}%`;
-  box.style.height = `${line.height}%`;
-  box.style.fontSize = `${line.fontSize}cqw`;
-  box.style.color = line.color;
-  box.style.letterSpacing = `${line.letterSpacing ?? 0}cqw`;
-  box.style.lineHeight = String(line.lineHeight ?? 1.05);
-  box.style.fontFamily = selectedFontCssStack(line);
-  box.style.fontWeight = String(lineFontWeight(line));
+  box.style.height = `${effectiveLineBoxHeight(line, style)}%`;
+  box.style.fontSize = `${style.fontSize}cqw`;
+  box.style.color = style.color;
+  box.style.letterSpacing = `${style.letterSpacing ?? 0}cqw`;
+  box.style.lineHeight = String(style.lineHeight ?? 1.05);
+  box.style.fontFamily = selectedFontCssStack(style.fontName);
+  box.style.fontWeight = String(style.fontWeight);
 }
 
-function resolvedLineFontName(line = null) {
-  const fontName = selectedFontName();
-  if (fontName === MATCH_BOOK_FONT_VALUE) return line?.fontFamily || fallbackFontName();
-  return fontName;
+function effectiveLineBoxHeight(line, style) {
+  return Math.max(line.rawHeight ?? line.height, style.fontSize * (style.lineHeight ?? 1.05));
 }
 
-function selectedFontCssStack(line = null) {
-  const fontName = resolvedLineFontName(line);
+function selectedFontCssStack(fontName = selectedFontName()) {
   if (fontName === "system-ui") return "system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
   return `"${fontName.replaceAll('"', '\\"')}", "Comic Sans MS", sans-serif`;
-}
-
-function lineFontWeight(line) {
-  const weight = Number(line?.fontWeight);
-  return Number.isFinite(weight) ? clamp(weight, 300, 700) : 400;
 }
 
 function makeDraggable(box, line, pageState) {
@@ -1403,7 +1725,7 @@ function makeDraggable(box, line, pageState) {
     const dy = ((event.clientY - start.y) / start.rect.height) * 100;
     line.left = clamp(start.left + dx, 0, 100 - line.width);
     line.top = clamp(start.top + dy, 0, 100 - line.height);
-    applyLineStyle(box, line);
+    applyLineStyle(box, line, pageState);
   });
   box.addEventListener("pointerup", () => {
     if (!start) return;
@@ -1417,16 +1739,52 @@ function updateLineList(pageState) {
   if (!node) return;
   const list = node.querySelector(".line-list");
   list.innerHTML = "";
-  pageState.lines.forEach((line) => {
+  pageState.lines.forEach((line, index) => {
+    const override = line.styleOverride || {};
+    const style = effectiveLineStyle(pageState, line);
     const row = document.createElement("div");
-    row.className = "line-row";
+    row.className = "line-editor";
     row.innerHTML = `
-      <input aria-label="Text" value="${escapeAttr(line.text)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
-      <input aria-label="Left" type="number" step="0.1" value="${line.left.toFixed(1)}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
-      <input aria-label="Top" type="number" step="0.1" value="${line.top.toFixed(1)}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
-      <span class="confidence" title="OCR confidence">${Math.round(line.confidence ?? 0)}%</span>
+      <div class="line-row">
+        <input aria-label="Text ${index + 1}" value="${escapeAttr(line.text)}" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+        <input aria-label="Left" type="number" step="0.1" value="${line.left.toFixed(1)}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+        <input aria-label="Top" type="number" step="0.1" value="${line.top.toFixed(1)}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+        <span class="confidence" title="OCR confidence">${Math.round(line.confidence ?? 0)}%</span>
+      </div>
+      <div class="line-style-controls">
+        <select class="line-saved-style" aria-label="Saved text box style"></select>
+        <button class="small apply-line-style">Apply</button>
+        <button class="small save-line-style">Save</button>
+        <button class="small reset-line-style">Reset</button>
+      </div>
+      <div class="style-grid line-override-grid">
+        <label class="field">
+          <span>Font</span>
+          <select class="line-font"></select>
+        </label>
+        <label class="field">
+          <span>Color</span>
+          <input class="line-color" type="color" value="${escapeAttr(override.color || style.color || "#a85652")}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+        </label>
+        <label class="field">
+          <span>Size</span>
+          <input class="line-size" type="number" min="0" max="18" step="0.1" placeholder="Inherit" value="${override.fontSize ?? ""}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+        </label>
+        <label class="field">
+          <span>Kerning</span>
+          <input class="line-spacing" type="number" min="-0.5" max="1.5" step="0.01" placeholder="Inherit" value="${override.letterSpacing ?? ""}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+        </label>
+        <label class="field">
+          <span>Line height</span>
+          <input class="line-line-height" type="number" min="0.8" max="2" step="0.05" placeholder="Inherit" value="${override.lineHeight ?? ""}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+        </label>
+      </div>
     `;
-    const [textInput, leftInput, topInput] = row.querySelectorAll("input");
+    const [textInput, leftInput, topInput] = row.querySelectorAll(".line-row input");
+    const savedSelect = row.querySelector(".line-saved-style");
+    fillSavedStyleSelect(savedSelect);
+    const fontSelect = row.querySelector(".line-font");
+    fillFontSelect(fontSelect, override.fontName || "", "Inherit page/book font");
     textInput.addEventListener("input", () => {
       line.text = textInput.value;
       refreshPageCard(pageState);
@@ -1439,8 +1797,41 @@ function updateLineList(pageState) {
       line.top = clamp(Number(topInput.value), 0, 100 - line.height);
       refreshPageCard(pageState);
     });
+    row.querySelector(".apply-line-style").addEventListener("click", () => {
+      const saved = selectedSavedStyle(savedSelect.value);
+      if (!saved) return;
+      applyStyleToLine(pageState, line, saved.values);
+    });
+    row.querySelector(".save-line-style").addEventListener("click", () => {
+      saveTextStyleFromPrompt(effectiveLineStyle(pageState, line), `Text box ${index + 1} style`);
+    });
+    row.querySelector(".reset-line-style").addEventListener("click", () => {
+      line.styleOverride = {};
+      refreshPageCard(pageState);
+    });
+    fontSelect.addEventListener("change", () => {
+      updateLineStyleOverride(pageState, line, "fontName", fontSelect.value);
+    });
+    row.querySelector(".line-color").addEventListener("input", (event) => {
+      updateLineStyleOverride(pageState, line, "color", event.target.value);
+    });
+    row.querySelector(".line-size").addEventListener("change", (event) => {
+      updateLineStyleOverride(pageState, line, "fontSize", event.target.value);
+    });
+    row.querySelector(".line-spacing").addEventListener("change", (event) => {
+      updateLineStyleOverride(pageState, line, "letterSpacing", event.target.value);
+    });
+    row.querySelector(".line-line-height").addEventListener("change", (event) => {
+      updateLineStyleOverride(pageState, line, "lineHeight", event.target.value);
+    });
     list.appendChild(row);
   });
+}
+
+function updateLineStyleOverride(pageState, line, field, value) {
+  line.styleOverride = updateStyleField(line.styleOverride || {}, field, value);
+  maybeLoadStyleFont(line.styleOverride);
+  refreshPageCard(pageState);
 }
 
 async function cleanPages(pages) {
@@ -1515,12 +1906,14 @@ async function locallyRepaintText(page) {
 }
 
 function paddedLineRect(page, line) {
+  const style = effectiveLineStyle(page, line);
+  const lineHeight = effectiveLineBoxHeight(line, style);
   const padX = page.width * 0.012;
   const padY = page.height * 0.008;
   const x = (line.left / 100) * page.width - padX;
   const y = (line.top / 100) * page.height - padY;
   const w = (line.width / 100) * page.width + padX * 2;
-  const h = (line.height / 100) * page.height + padY * 2;
+  const h = (lineHeight / 100) * page.height + padY * 2;
   return {
     x: clamp(x, 0, page.width),
     y: clamp(y, 0, page.height),
@@ -1592,12 +1985,14 @@ async function createMaskBlob(page) {
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   ctx.globalCompositeOperation = "destination-out";
   for (const line of page.lines) {
+    const style = effectiveLineStyle(page, line);
+    const lineHeight = effectiveLineBoxHeight(line, style);
     const padX = page.width * 0.018;
     const padY = page.height * 0.014;
     const x = (line.left / 100) * page.width - padX;
     const y = (line.top / 100) * page.height - padY;
     const w = (line.width / 100) * page.width + padX * 2;
-    const h = (line.height / 100) * page.height + padY * 2;
+    const h = (lineHeight / 100) * page.height + padY * 2;
     roundRect(ctx, x, y, w, h, Math.max(10, h * 0.35));
     ctx.fill();
   }
@@ -1653,14 +2048,15 @@ async function exportLayeredPdf() {
     }
     doc.addImage(page.cleanDataUrl, "PNG", 0, 0, page.width, page.height);
     for (const line of page.lines) {
-      const lineFont = resolvedLineFontName(line);
-      const fontSize = (line.fontSize / 100) * page.width;
-      const fontStyle = !registeredFonts.has(lineFont) && lineFontWeight(line) >= 600 ? "bold" : "normal";
+      const style = effectiveLineStyle(page, line);
+      const lineFont = style.fontName;
+      const fontSize = (style.fontSize / 100) * page.width;
+      const fontStyle = !registeredFonts.has(lineFont) && style.fontWeight >= 600 ? "bold" : "normal";
       doc.setFont(registeredFonts.has(lineFont) ? lineFont : "helvetica", fontStyle);
       doc.setFontSize(fontSize);
-      doc.setTextColor(line.color);
+      doc.setTextColor(style.color);
       if (typeof doc.setCharSpace === "function") {
-        doc.setCharSpace(((line.letterSpacing ?? 0) / 100) * page.width);
+        doc.setCharSpace(((style.letterSpacing ?? 0) / 100) * page.width);
       }
       const x = (line.left / 100) * page.width + ((line.width / 100) * page.width) / 2;
       const y = (line.top / 100) * page.height + fontSize;
@@ -1714,16 +2110,17 @@ async function exportPowerPoint() {
     slide.background = { color: "FFFFFF" };
     slide.addImage({ data: page.cleanDataUrl, x: 0, y: 0, w: pptx.width, h: pptx.height });
     for (const line of page.lines) {
-      const charSpacing = ((line.letterSpacing ?? 0) / 100) * pptx.width * 72;
+      const style = effectiveLineStyle(page, line);
+      const charSpacing = ((style.letterSpacing ?? 0) / 100) * pptx.width * 72;
       slide.addText(line.text, {
         x: (line.left / 100) * pptx.width,
         y: (line.top / 100) * pptx.height,
         w: (line.width / 100) * pptx.width,
-        h: (line.height / 100) * pptx.height,
-        fontFace: resolvedLineFontName(line),
-        bold: lineFontWeight(line) >= 600,
-        fontSize: Math.max(8, (line.fontSize / 100) * pptx.width * 72),
-        color: line.color.replace("#", ""),
+        h: (effectiveLineBoxHeight(line, style) / 100) * pptx.height,
+        fontFace: style.fontName,
+        bold: style.fontWeight >= 600,
+        fontSize: Math.max(8, (style.fontSize / 100) * pptx.width * 72),
+        color: style.color.replace("#", ""),
         charSpacing,
         align: "center",
         valign: "mid",

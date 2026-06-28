@@ -60,12 +60,14 @@ spend controls.
    traineddata language set, and Albanian uses the `sqi` language model.
 6. Tune the OCR confidence, white backing filter, and optional text size
    override when illustrated backgrounds create false text boxes.
-7. Use the text style panel to choose font, custom TTF/OTF, color, size,
-   kerning, and line height before rendering. **Match book font** is the
-   default; with PDF native text it tries to map embedded PDF font names to the
-   closest available web font for each line.
+7. Use the text style panel to choose the book-level font, custom TTF/OTF,
+   color, size, kerning, and line height before rendering. **Match book font**
+   is the default; with PDF native text it tries to map embedded PDF font names
+   to the closest available web font for each line.
 8. Run **Render & OCR**.
-9. Drag/edit text boxes in the review screen.
+9. Drag/edit text boxes in the review screen. You can override style at the
+   page level or on individual text boxes, then save reusable styles for the
+   rest of the book.
 10. Choose a cleanup mode and run **Apply Cleanup Mode**.
 11. Export a layered PDF or editable PowerPoint.
 
@@ -100,6 +102,9 @@ spend controls.
   maps common book fonts such as Poppins and Patrick Hand to Google Fonts for
   preview and PowerPoint export. Uploaded fonts are used for live preview and
   PDF embedding, and the most recent uploaded font is saved in IndexedDB.
+- Text styling cascades from book style to page override to text-box override.
+  Saved text styles are kept in local storage and can be applied back to the
+  whole book, a single page, or a single text box.
 - Browser-side layered PDF export can only embed the bundled Mouse Memoirs font
   or a user-uploaded custom TTF/OTF. Native PDF font matches that are not
   uploaded may fall back to PDF core fonts in the exported PDF.

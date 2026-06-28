@@ -120,6 +120,9 @@ spend controls.
 - Cleanup mode defaults to **No cleanup - overlay only**, which keeps the
   original rendered page image and places editable text above it. This is useful
   for native PDF text extraction when you do not want white repaint boxes.
+- **Tight white text fill** is for comics and speech bubbles. It replaces likely
+  dark text pixels inside each detected text box with the local white backing,
+  so bubble edges and caption shapes stay intact.
 - **Local white repaint** uses canvas sampling to cover detected text without
   calling any image API. Use **OpenAI image edit** only for pages where text
   crosses detailed artwork.

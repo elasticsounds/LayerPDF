@@ -2323,7 +2323,7 @@ async function cleanPages(pages) {
   const mode = els.cleanupMode.value || "none";
   const apiKey = els.apiKey.value.trim();
   if ((mode === "openai" || mode === "auto") && !apiKey) {
-    setStatus("Enter an OpenAI API key or switch Cleanup mode to No cleanup or Local white repaint.");
+    setStatus("Enter an OpenAI API key or switch Cleanup mode to No cleanup, Tight white text fill, or Local white repaint.");
     return;
   }
   let failed = 0;
@@ -2344,12 +2344,13 @@ async function cleanPages(pages) {
     }
   }
   if (failed > 0) {
-    setStatus(`Finished with ${failed} page${failed === 1 ? "" : "s"} skipped. Try Local white repaint for blocked pages.`, 100);
+    setStatus(`Finished with ${failed} page${failed === 1 ? "" : "s"} skipped. Try Tight white text fill or Local white repaint for blocked pages.`, 100);
   }
 }
 
 async function cleanPage(page, mode, apiKey) {
   if (mode === "none") return page.imageDataUrl;
+  if (mode === "whiteText") return locallyFillWhiteText(page);
   if (mode === "local") return locallyRepaintText(page);
   if (mode === "openai") return openAiCleanPage(page, apiKey);
   const local = await locallyRepaintText(page);
@@ -2388,6 +2389,25 @@ async function locallyRepaintText(page) {
   return canvas.toDataURL("image/png");
 }
 
+async function locallyFillWhiteText(page) {
+  if (!page.lines?.length) return page.imageDataUrl;
+  const image = await loadImage(page.imageDataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = page.width;
+  canvas.height = page.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(image, 0, 0, page.width, page.height);
+  const imageData = ctx.getImageData(0, 0, page.width, page.height);
+  for (const line of page.lines) {
+    const rect = tightLineRect(page, line);
+    const fill = sampleInteriorWhiteFill(imageData, page.width, page.height, rect);
+    if (!fill) continue;
+    fillInkPixelsInRect(imageData, page.width, page.height, rect, fill);
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/png");
+}
+
 function paddedLineRect(page, line) {
   const style = effectiveLineStyle(page, line);
   const lineHeight = effectiveLineBoxHeight(line, style);
@@ -2402,6 +2422,25 @@ function paddedLineRect(page, line) {
     y: clamp(y, 0, page.height),
     w: clamp(w, 1, page.width - clamp(x, 0, page.width)),
     h: clamp(h, 1, page.height - clamp(y, 0, page.height)),
+  };
+}
+
+function tightLineRect(page, line) {
+  const style = effectiveLineStyle(page, line);
+  const lineHeight = effectiveLineBoxHeight(line, style);
+  const padX = Math.max(1, page.width * 0.003);
+  const padY = Math.max(1, page.height * 0.002);
+  const x = (line.left / 100) * page.width - padX;
+  const y = (line.top / 100) * page.height - padY;
+  const w = (line.width / 100) * page.width + padX * 2;
+  const h = (lineHeight / 100) * page.height + padY * 2;
+  const clampedX = clamp(x, 0, page.width);
+  const clampedY = clamp(y, 0, page.height);
+  return {
+    x: clampedX,
+    y: clampedY,
+    w: clamp(w, 1, page.width - clampedX),
+    h: clamp(h, 1, page.height - clampedY),
   };
 }
 
@@ -2434,6 +2473,85 @@ function sampleLocalFill(imageData, width, height, rect) {
   return `rgb(${color[0]}, ${color[1]}, ${color[2]})`;
 }
 
+function sampleInteriorWhiteFill(imageData, width, height, rect) {
+  const samples = [];
+  const samplePadX = Math.max(2, width * 0.004, rect.w * 0.2);
+  const samplePadY = Math.max(2, height * 0.003, rect.h * 0.25);
+  const x0 = clamp(Math.floor(rect.x - samplePadX), 0, width - 1);
+  const y0 = clamp(Math.floor(rect.y - samplePadY), 0, height - 1);
+  const x1 = clamp(Math.ceil(rect.x + rect.w + samplePadX), x0 + 1, width);
+  const y1 = clamp(Math.ceil(rect.y + rect.h + samplePadY), y0 + 1, height);
+  let checked = 0;
+  let light = 0;
+  const step = Math.max(1, Math.floor(Math.sqrt(((x1 - x0) * (y1 - y0)) / 6000)));
+  for (let y = y0; y < y1; y += step) {
+    for (let x = x0; x < x1; x += step) {
+      const offset = (y * width + x) * 4;
+      const r = imageData.data[offset];
+      const g = imageData.data[offset + 1];
+      const b = imageData.data[offset + 2];
+      checked += 1;
+      if (isWhiteBackingPixel(r, g, b)) {
+        light += 1;
+        samples.push([r, g, b]);
+      }
+    }
+  }
+  if (checked === 0 || light / checked < 0.18) return null;
+  return medianColor(samples.length > 0 ? samples : [[255, 255, 255]]);
+}
+
+function fillInkPixelsInRect(imageData, width, height, rect, fill) {
+  const x0 = clamp(Math.floor(rect.x), 0, width - 1);
+  const y0 = clamp(Math.floor(rect.y), 0, height - 1);
+  const x1 = clamp(Math.ceil(rect.x + rect.w), x0 + 1, width);
+  const y1 = clamp(Math.ceil(rect.y + rect.h), y0 + 1, height);
+  const rectWidth = x1 - x0;
+  const rectHeight = y1 - y0;
+  const mask = new Uint8Array(rectWidth * rectHeight);
+  let inkCount = 0;
+  for (let y = y0; y < y1; y += 1) {
+    for (let x = x0; x < x1; x += 1) {
+      const offset = (y * width + x) * 4;
+      const r = imageData.data[offset];
+      const g = imageData.data[offset + 1];
+      const b = imageData.data[offset + 2];
+      const alpha = imageData.data[offset + 3];
+      if (alpha > 10 && isLikelyTextInkPixel(r, g, b)) {
+        mask[(y - y0) * rectWidth + (x - x0)] = 1;
+        inkCount += 1;
+      }
+    }
+  }
+  if (inkCount === 0) return;
+  for (let y = 0; y < rectHeight; y += 1) {
+    for (let x = 0; x < rectWidth; x += 1) {
+      if (!mask[y * rectWidth + x]) continue;
+      for (let yy = Math.max(0, y - 1); yy <= Math.min(rectHeight - 1, y + 1); yy += 1) {
+        for (let xx = Math.max(0, x - 1); xx <= Math.min(rectWidth - 1, x + 1); xx += 1) {
+          const offset = ((y0 + yy) * width + (x0 + xx)) * 4;
+          imageData.data[offset] = fill[0];
+          imageData.data[offset + 1] = fill[1];
+          imageData.data[offset + 2] = fill[2];
+          imageData.data[offset + 3] = 255;
+        }
+      }
+    }
+  }
+}
+
+function isWhiteBackingPixel(r, g, b) {
+  const brightness = (r + g + b) / 3;
+  const spread = Math.max(r, g, b) - Math.min(r, g, b);
+  return brightness > 205 && spread < 65;
+}
+
+function isLikelyTextInkPixel(r, g, b) {
+  const brightness = (r + g + b) / 3;
+  const spread = Math.max(r, g, b) - Math.min(r, g, b);
+  return brightness < 145 || (brightness < 190 && spread < 75);
+}
+
 function medianColor(samples) {
   return [0, 1, 2].map((channel) => {
     const values = samples.map((sample) => sample[channel]).sort((a, b) => a - b);
@@ -2443,6 +2561,7 @@ function medianColor(samples) {
 
 function cleanupModeLabel(mode) {
   if (mode === "none") return "no cleanup";
+  if (mode === "whiteText") return "tight white text fill";
   if (mode === "openai") return "OpenAI image edit";
   if (mode === "auto") return "local/OpenAI auto";
   return "local repaint";

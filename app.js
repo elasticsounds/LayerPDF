@@ -14,7 +14,7 @@ const state = {
 };
 
 const SETTINGS_KEY = "layerpdf.settings.v1";
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 const DB_NAME = "layerpdf";
 const DB_VERSION = 1;
 const PDF_STORE = "files";
@@ -322,6 +322,9 @@ function restoreSettings() {
   }
   if ((settings.settingsVersion ?? 1) < 3 && settings.cleanupMode === "local") {
     settings.cleanupMode = "none";
+  }
+  if ((settings.settingsVersion ?? 1) < 4 && settings.tileMode === "auto") {
+    settings.tileMode = "none";
   }
   for (const field of persistentFields()) {
     if (!(field.id in settings)) continue;
@@ -651,7 +654,10 @@ async function renderPdfPage(pageNumber) {
 }
 
 async function detectImageTiling(page) {
-  const tileMode = els.tileMode.value || "auto";
+  const tileMode = els.tileMode.value || "none";
+  if (tileMode === "none") {
+    return { imageOps: 0, imageRuns: 0, maxImageRun: 0, detectedTiling: false, likelyTiled: false, forced: false };
+  }
   if (tileMode === "force") {
     return { imageOps: 0, imageRuns: 0, maxImageRun: 0, detectedTiling: true, likelyTiled: true, forced: true };
   }

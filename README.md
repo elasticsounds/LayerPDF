@@ -49,8 +49,9 @@ spend controls.
 
 1. Upload a scanned PDF.
 2. Choose the story page range.
-3. Choose tile handling. Auto mode detects pages with many image fragments and
-   consolidates them through a full-page render before OCR.
+3. Optionally choose tile handling. It is disabled by default; Auto mode detects
+   pages with many image fragments and flags them as consolidated through the
+   full-page render before OCR.
 4. Choose the OCR/text engine. **PDF native text** extracts positioned text from
    the PDF for textbook-style files; Browser Tesseract runs fully locally;
    Gemini vision OCR uses a Gemini API key to detect story text and boxes from
@@ -81,11 +82,11 @@ spend controls.
   still contain real PDF text but have tiled images from flattened transparency.
   It extracts positioned PDF text, repairs simple doubled text artifacts, and
   locally repaints the rendered background behind the editable text layer.
-- Tile handling uses PDF image-paint operations to flag pages that look like
-  image grids. LayerPDF already renders each page to a single full-page
-  background image, so tiled scanned pages are consolidated before text cleanup.
-  Mixed digital textbooks with real PDF text and tiled figures will need a later
-  object-level path.
+- Tile handling is opt-in. When enabled, it uses PDF image-paint operations to
+  flag pages that look like image grids. LayerPDF already renders each page to a
+  single full-page background image, so tiled scanned pages are consolidated
+  before text cleanup. Mixed digital textbooks with real PDF text and tiled
+  figures will need a later object-level path.
 - The app persists settings in local storage and the most recent PDF in
   IndexedDB. Browsers do not allow file inputs to be visually refilled after a
   refresh, so the picker may look empty even when the PDF is restored.

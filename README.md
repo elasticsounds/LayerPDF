@@ -49,18 +49,20 @@ spend controls.
 
 1. Upload a scanned PDF.
 2. Choose the story page range.
-3. Choose the OCR engine. Browser Tesseract runs fully locally; Gemini vision
+3. Choose tile handling. Auto mode detects pages with many image fragments and
+   consolidates them through a full-page render before OCR.
+4. Choose the OCR engine. Browser Tesseract runs fully locally; Gemini vision
    OCR uses a Gemini API key to detect story text and boxes from the page image.
-4. Choose the OCR language. The picker includes the full practical Tesseract
+5. Choose the OCR language. The picker includes the full practical Tesseract
    traineddata language set, and Albanian uses the `sqi` language model.
-5. Tune the OCR confidence, white backing filter, and optional text size
+6. Tune the OCR confidence, white backing filter, and optional text size
    override when illustrated backgrounds create false text boxes.
-6. Use the text style panel to choose font, custom TTF/OTF, color, size,
+7. Use the text style panel to choose font, custom TTF/OTF, color, size,
    kerning, and line height before rendering.
-7. Run **Render & OCR**.
-8. Drag/edit text boxes in the review screen.
-9. Choose a cleanup mode and run **Remove Burned-In Text**.
-10. Export a layered PDF or editable PowerPoint.
+8. Run **Render & OCR**.
+9. Drag/edit text boxes in the review screen.
+10. Choose a cleanup mode and run **Remove Burned-In Text**.
+11. Export a layered PDF or editable PowerPoint.
 
 ## Notes
 
@@ -71,6 +73,11 @@ spend controls.
 - Gemini OCR sends each rendered page image to Gemini and asks for exact story
   text lines with normalized bounding boxes. It is useful when Tesseract misses
   illustrated or low-contrast pages.
+- Tile handling uses PDF image-paint operations to flag pages that look like
+  image grids. LayerPDF already renders each page to a single full-page
+  background image, so tiled scanned pages are consolidated before text cleanup.
+  Mixed digital textbooks with real PDF text and tiled figures will need a later
+  object-level path.
 - The app persists settings in local storage and the most recent PDF in
   IndexedDB. Browsers do not allow file inputs to be visually refilled after a
   refresh, so the picker may look empty even when the PDF is restored.

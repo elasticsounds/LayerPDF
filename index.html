@@ -28,6 +28,14 @@
             <input id="pageRange" type="text" placeholder="All, or 6-23" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
           </label>
           <label class="field">
+            <span>Tile handling</span>
+            <select id="tileMode">
+              <option value="auto" selected>Auto stitch tiled pages</option>
+              <option value="force">Force full-page stitch</option>
+              <option value="detect">Detect only</option>
+            </select>
+          </label>
+          <label class="field">
             <span>OCR engine</span>
             <select id="ocrEngine">
               <option value="tesseract" selected>Browser Tesseract</option>

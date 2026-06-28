@@ -172,6 +172,7 @@ const OCR_LANGUAGES = [
 const els = {
   pdfInput: $("pdfInput"),
   pageRange: $("pageRange"),
+  tileMode: $("tileMode"),
   ocrEngine: $("ocrEngine"),
   ocrLang: $("ocrLang"),
   ocrLangOptions: $("ocrLangOptions"),
@@ -273,6 +274,7 @@ function initializePersistence() {
 function persistentFields() {
   return [
     els.pageRange,
+    els.tileMode,
     els.ocrEngine,
     els.ocrLang,
     els.geminiApiKey,
@@ -544,6 +546,7 @@ async function renderAndOcr() {
   for (let i = 0; i < pages.length; i += 1) {
     const pageNumber = pages[i];
     const rendered = await renderPdfPage(pageNumber);
+    const tileStats = rendered.tileStats;
     const pageState = {
       pageNumber,
       width: rendered.width,
@@ -552,9 +555,16 @@ async function renderAndOcr() {
       cleanDataUrl: rendered.dataUrl,
       lines: [],
       ocrStats: null,
+      tileStats,
     };
     state.pages.push(pageState);
     renderPageCard(pageState);
+    if (tileStats.likelyTiled) {
+      setStatus(
+        `Page ${pageNumber}: detected ${tileStats.imageOps} image fragments; using stitched full-page background.`,
+        (i / pages.length) * 50 + 18,
+      );
+    }
     setStatus(`OCR page ${pageNumber}...`, (i / pages.length) * 50 + 20);
     let ocr;
     try {
@@ -585,6 +595,7 @@ async function renderAndOcr() {
 
 async function renderPdfPage(pageNumber) {
   const page = await state.pdf.getPage(pageNumber);
+  const tileStats = await detectImageTiling(page);
   const viewport = page.getViewport({ scale: 1 });
   const targetMax = 2048;
   const scale = targetMax / Math.max(viewport.width, viewport.height);
@@ -599,6 +610,51 @@ async function renderPdfPage(pageNumber) {
     width: canvas.width,
     height: canvas.height,
     dataUrl: canvas.toDataURL("image/png"),
+    tileStats,
+  };
+}
+
+async function detectImageTiling(page) {
+  const tileMode = els.tileMode.value || "auto";
+  if (tileMode === "force") {
+    return { imageOps: 0, imageRuns: 0, maxImageRun: 0, detectedTiling: true, likelyTiled: true, forced: true };
+  }
+  const opList = await page.getOperatorList();
+  const imageOps = new Set(
+    [
+      pdfjsLib.OPS.paintImageXObject,
+      pdfjsLib.OPS.paintImageXObjectRepeat,
+      pdfjsLib.OPS.paintInlineImageXObject,
+      pdfjsLib.OPS.paintInlineImageXObjectGroup,
+      pdfjsLib.OPS.paintImageMaskXObject,
+      pdfjsLib.OPS.paintImageMaskXObjectGroup,
+      pdfjsLib.OPS.paintImageMaskXObjectRepeat,
+      pdfjsLib.OPS.paintSolidColorImageMask,
+    ].filter(Number.isFinite),
+  );
+  let imageCount = 0;
+  let imageRuns = 0;
+  let run = 0;
+  let maxImageRun = 0;
+  for (const fn of opList.fnArray) {
+    if (imageOps.has(fn)) {
+      imageCount += 1;
+      run += 1;
+      maxImageRun = Math.max(maxImageRun, run);
+    } else {
+      if (run > 0) imageRuns += 1;
+      run = 0;
+    }
+  }
+  if (run > 0) imageRuns += 1;
+  const detectedTiling = imageCount >= 24 || maxImageRun >= 8;
+  return {
+    imageOps: imageCount,
+    imageRuns,
+    maxImageRun,
+    detectedTiling,
+    likelyTiled: tileMode !== "detect" && detectedTiling,
+    forced: false,
   };
 }
 
@@ -1015,10 +1071,15 @@ function refreshPageCard(pageState) {
   const node = pageCard(pageState);
   if (!node) return;
   const title = node.querySelector(".page-title");
+  const tileLabel = pageState.tileStats?.detectedTiling
+    ? ` · ${pageState.tileStats.likelyTiled ? "stitched" : "detected"} ${
+        pageState.tileStats.forced ? "full page" : `${pageState.tileStats.imageOps} tiles`
+      }`
+    : "";
   if (pageState.ocrStats) {
-    title.textContent = `Page ${pageState.pageNumber} · ${pageState.ocrStats.engine} ${pageState.ocrStats.kept}/${pageState.ocrStats.total}`;
+    title.textContent = `Page ${pageState.pageNumber}${tileLabel} · ${pageState.ocrStats.engine} ${pageState.ocrStats.kept}/${pageState.ocrStats.total}`;
   } else {
-    title.textContent = `Page ${pageState.pageNumber}`;
+    title.textContent = `Page ${pageState.pageNumber}${tileLabel}`;
   }
   node.querySelector("summary").textContent = `Text boxes (${pageState.lines.length})`;
   node.querySelector(".page-image").src = pageState.cleanDataUrl;

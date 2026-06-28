@@ -2062,7 +2062,6 @@ async function exportLayeredPdf() {
       const y = (line.top / 100) * page.height + fontSize;
       doc.text(line.text, x, y, {
         align: "center",
-        maxWidth: (line.width / 100) * page.width,
       });
     }
   });

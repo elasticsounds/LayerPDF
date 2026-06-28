@@ -343,17 +343,23 @@ summary {
   color: var(--muted);
 }
 
-.style-actions,
-.line-style-controls {
+.style-actions {
   display: grid;
   grid-template-columns: minmax(120px, 1fr) repeat(4, auto);
   gap: 7px;
   align-items: center;
 }
 
+.line-style-controls {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) repeat(5, auto);
+  gap: 7px;
+  align-items: center;
+}
+
 .style-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 

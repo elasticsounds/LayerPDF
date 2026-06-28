@@ -22,6 +22,7 @@ const DB_VERSION = 1;
 const PDF_STORE = "files";
 const LAST_PDF_ID = "lastPdf";
 const LAST_FONT_ID = "lastFont";
+const LAST_SESSION_ID = "lastSession";
 const CUSTOM_FONT_VALUE = "Custom story font";
 const MATCH_BOOK_FONT_VALUE = "__match_book__";
 
@@ -59,7 +60,8 @@ const BOOK_FONT_MATCHES = [
   ["lexend", "Lexend"],
 ];
 
-const TEXT_STYLE_FIELDS = ["fontName", "color", "fontSize", "letterSpacing", "lineHeight", "fontWeight"];
+const TEXT_STYLE_FIELDS = ["fontName", "color", "fontSize", "letterSpacing", "lineHeight", "fontWeight", "align"];
+let sessionSaveTimer = null;
 
 const OCR_LANGUAGES = [
   ["afr", "Afrikaans"],
@@ -208,6 +210,7 @@ const els = {
   fontSizeOverride: $("fontSizeOverride"),
   letterSpacing: $("letterSpacing"),
   lineHeight: $("lineHeight"),
+  textAlign: $("textAlign"),
   cleanupMode: $("cleanupMode"),
   apiKey: $("apiKey"),
   imageModel: $("imageModel"),
@@ -234,6 +237,10 @@ const els = {
 els.pdfInput.addEventListener("change", () => {
   state.pdfFile = els.pdfInput.files?.[0] ?? null;
   els.workspaceTitle.textContent = state.pdfFile ? state.pdfFile.name : "No PDF loaded";
+  state.pages = [];
+  els.pageGrid.innerHTML = "";
+  els.emptyState.hidden = false;
+  clearSavedSession().catch(() => {});
   if (state.pdfFile) {
     saveLastPdf(state.pdfFile).catch(() => {
       setStatus("PDF loaded, but this browser could not save it for refresh.");
@@ -271,18 +278,27 @@ els.fontSizeOverride.addEventListener("change", () => {
   if (state.pages.length === 0) return;
   const fontSize = normalizeFontSizes(state.pages);
   state.pages.forEach(refreshPageCard);
+  scheduleSaveSession();
   setStatus(`Updated text size to ${fontSize.toFixed(1)}.`, 100);
 });
 els.fontName.addEventListener("change", () => {
   applySelectedFont();
   state.pages.forEach(refreshPageCard);
+  scheduleSaveSession();
 });
-for (const field of [els.textColor, els.letterSpacing, els.lineHeight]) {
-  field.addEventListener("input", () => {
+for (const field of [els.textColor, els.letterSpacing, els.lineHeight, els.textAlign]) {
+  field.addEventListener(field === els.textAlign ? "change" : "input", () => {
     applyTextStyleToPages();
     state.pages.forEach(refreshPageCard);
+    scheduleSaveSession();
   });
 }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden" && state.pages.length > 0) {
+    clearTimeout(sessionSaveTimer);
+    saveCurrentSession().catch(() => {});
+  }
+});
 
 populateOcrLanguages();
 initializePersistence();
@@ -308,6 +324,7 @@ function initializePersistence() {
   restoreSettings();
   bindPersistentSettings();
   restoreLastPdf();
+  restoreLastSession();
   restoreLastFont();
 }
 
@@ -325,6 +342,7 @@ function persistentFields() {
     els.fontSizeOverride,
     els.letterSpacing,
     els.lineHeight,
+    els.textAlign,
     els.cleanupMode,
     els.apiKey,
     els.imageModel,
@@ -545,6 +563,113 @@ async function readSavedFont() {
   return getRecord(db, PDF_STORE, LAST_FONT_ID);
 }
 
+function scheduleSaveSession() {
+  clearTimeout(sessionSaveTimer);
+  sessionSaveTimer = setTimeout(() => {
+    saveCurrentSession().catch(() => {
+      setStatus("Workspace updated, but this browser could not save the session for refresh.");
+    });
+  }, 500);
+}
+
+async function saveCurrentSession() {
+  if (state.pages.length === 0) {
+    await clearSavedSession();
+    return;
+  }
+  const record = {
+    id: LAST_SESSION_ID,
+    savedAt: Date.now(),
+    pdfName: state.pdfFile?.name || els.workspaceTitle.textContent || "Restored PDF",
+    pages: state.pages.map(serializePageState),
+  };
+  const db = await openLayerDb();
+  await putRecord(db, PDF_STORE, record);
+}
+
+function serializePageState(page) {
+  return {
+    pageNumber: page.pageNumber,
+    width: page.width,
+    height: page.height,
+    imageDataUrl: page.imageDataUrl,
+    cleanDataUrl: page.cleanDataUrl,
+    styleOverride: sanitizeTextStyle(page.styleOverride || {}),
+    lines: page.lines.map(serializeLineState),
+    ocrStats: page.ocrStats,
+    tileStats: page.tileStats,
+  };
+}
+
+function serializeLineState(line) {
+  return {
+    id: line.id || `line-${crypto.randomUUID()}`,
+    text: String(line.text ?? ""),
+    left: clampOptional(Number(line.left), 0, 100, 20),
+    top: clampOptional(Number(line.top), 0, 100, 10),
+    width: clampOptional(Number(line.width), 1, 100, 60),
+    height: clampOptional(Number(line.height), 0.5, 100, 5),
+    rawWidth: clampOptional(Number(line.rawWidth), 0.5, 100, Number(line.width) || 60),
+    rawHeight: clampOptional(Number(line.rawHeight), 0.5, 100, Number(line.height) || 5),
+    rawFontSize: clampOptional(Number(line.rawFontSize), 0.4, 18, Number(line.fontSize) || 4.2),
+    fontSize: clampOptional(Number(line.fontSize), 0.4, 18, 4.2),
+    confidence: clampOptional(Number(line.confidence), 0, 100, 100),
+    color: normalizeColor(line.color, "#a85652"),
+    letterSpacing: clampOptional(Number(line.letterSpacing), -0.5, 1.5, 0),
+    lineHeight: clampOptional(Number(line.lineHeight), 0.8, 2, 1.05),
+    align: normalizeAlign(line.align),
+    fontFamily: String(line.fontFamily || fallbackFontName()),
+    fontWeight: clampOptional(Number(line.fontWeight), 300, 700, 400),
+    textMetrics: line.textMetrics || measureTextQuality(String(line.text ?? "")),
+    lightRatio: Number.isFinite(Number(line.lightRatio)) ? Number(line.lightRatio) : 1,
+    styleOverride: sanitizeTextStyle(line.styleOverride || {}),
+  };
+}
+
+async function restoreLastSession() {
+  try {
+    const saved = await readSavedSession();
+    if (!saved?.pages?.length || state.pages.length > 0) return;
+    state.pages = saved.pages.map(normalizeSavedPageState).filter(Boolean);
+    if (state.pages.length === 0) return;
+    els.pageGrid.innerHTML = "";
+    els.emptyState.hidden = true;
+    els.workspaceTitle.textContent = saved.pdfName || state.pdfFile?.name || "Restored workspace";
+    for (const page of state.pages) {
+      renderPageCard(page);
+      refreshPageCard(page);
+    }
+    setStatus(`Restored ${state.pages.length} saved page${state.pages.length === 1 ? "" : "s"}.`, 100);
+  } catch {
+    // Session restore is a convenience layer; a bad saved session should not block the app.
+  }
+}
+
+function normalizeSavedPageState(page) {
+  if (!page?.imageDataUrl || !Number.isFinite(Number(page.width)) || !Number.isFinite(Number(page.height))) return null;
+  return {
+    pageNumber: Number(page.pageNumber) || 1,
+    width: Number(page.width),
+    height: Number(page.height),
+    imageDataUrl: page.imageDataUrl,
+    cleanDataUrl: page.cleanDataUrl || page.imageDataUrl,
+    styleOverride: sanitizeTextStyle(page.styleOverride || {}),
+    lines: Array.isArray(page.lines) ? page.lines.map(serializeLineState) : [],
+    ocrStats: page.ocrStats || null,
+    tileStats: page.tileStats || null,
+  };
+}
+
+async function readSavedSession() {
+  const db = await openLayerDb();
+  return getRecord(db, PDF_STORE, LAST_SESSION_ID);
+}
+
+async function clearSavedSession() {
+  const db = await openLayerDb();
+  await deleteRecord(db, PDF_STORE, LAST_SESSION_ID);
+}
+
 function openLayerDb() {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
@@ -574,6 +699,15 @@ function getRecord(db, storeName, id) {
     const request = transaction.objectStore(storeName).get(id);
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
+  });
+}
+
+function deleteRecord(db, storeName, id) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, "readwrite");
+    transaction.objectStore(storeName).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error);
   });
 }
 
@@ -740,9 +874,6 @@ async function renderAndOcr() {
     }
     pageState.lines = ocr.lines;
     pageState.ocrStats = ocr.stats;
-    if (pageState.lines.length === 0) {
-      pageState.lines = [defaultLine()];
-    }
     if (els.ocrEngine.value === "native" && pageState.lines.length > 0 && cleanupModeUsesLocalRepaint()) {
       setStatus(`Consolidating page ${pageNumber} background from native PDF text...`, ((i + 1) / pages.length) * 65);
       pageState.cleanDataUrl = await locallyRepaintText(pageState);
@@ -760,6 +891,7 @@ async function renderAndOcr() {
     `Review ${totals.kept} kept OCR lines from ${totals.total}; text size ${fontSize.toFixed(1)}.`,
     100,
   );
+  scheduleSaveSession();
 }
 
 async function renderPdfPage(pageNumber) {
@@ -896,6 +1028,7 @@ function nativeTextItemToLine(item, index, viewport, width, height, textStyle, s
     color: textStyle.color,
     letterSpacing: textStyle.letterSpacing,
     lineHeight: textStyle.lineHeight,
+    align: textStyle.align,
     fontFamily,
     fontWeight,
   };
@@ -1074,6 +1207,7 @@ async function tesseractOcrLines(canvas, width, height) {
         color: textStyle.color,
         letterSpacing: textStyle.letterSpacing,
         lineHeight: textStyle.lineHeight,
+        align: textStyle.align,
         fontFamily: fallbackFontName(),
         fontWeight: 400,
       };
@@ -1218,6 +1352,7 @@ function geminiLineToOverlay(line, index) {
     color: textStyle.color,
     letterSpacing: textStyle.letterSpacing,
     lineHeight: textStyle.lineHeight,
+    align: textStyle.align,
     fontFamily: fallbackFontName(),
     fontWeight: 400,
   };
@@ -1361,6 +1496,7 @@ function currentTextStyle() {
     color: style.color,
     letterSpacing: style.letterSpacing,
     lineHeight: style.lineHeight,
+    align: style.align,
   };
 }
 
@@ -1371,6 +1507,7 @@ function currentBookStyle() {
     fontSize: parseOptionalNumber(els.fontSizeOverride.value),
     letterSpacing: clampOptional(Number(els.letterSpacing.value), -0.5, 1.5, 0),
     lineHeight: clampOptional(Number(els.lineHeight.value), 0.8, 2, 1.05),
+    align: normalizeAlign(els.textAlign.value),
   });
 }
 
@@ -1387,6 +1524,7 @@ function applyTextStyleToLine(line) {
   line.color = style.color;
   line.letterSpacing = style.letterSpacing;
   line.lineHeight = style.lineHeight;
+  line.align = style.align;
   line.height = Math.max(line.rawHeight ?? line.height, line.fontSize * style.lineHeight);
 }
 
@@ -1415,6 +1553,9 @@ function sanitizeTextStyle(style) {
   if (Number.isFinite(fontWeight)) {
     result.fontWeight = clamp(fontWeight, 300, 700);
   }
+  if (style.align !== undefined) {
+    result.align = normalizeAlign(style.align);
+  }
   return result;
 }
 
@@ -1442,6 +1583,7 @@ function effectiveLineStyle(page, line) {
     letterSpacing: line?.letterSpacing,
     lineHeight: line?.lineHeight,
     fontWeight: line?.fontWeight,
+    align: line?.align,
   };
   const merged = mergeTextStyles(lineBase, page?.styleOverride, line?.styleOverride);
   if (!merged.fontName || merged.fontName === MATCH_BOOK_FONT_VALUE) {
@@ -1452,6 +1594,7 @@ function effectiveLineStyle(page, line) {
   if (!Number.isFinite(merged.letterSpacing)) merged.letterSpacing = line?.letterSpacing ?? 0;
   if (!Number.isFinite(merged.lineHeight)) merged.lineHeight = line?.lineHeight ?? 1.05;
   if (!Number.isFinite(merged.fontWeight)) merged.fontWeight = line?.fontWeight ?? 400;
+  if (!merged.align) merged.align = line?.align || "center";
   return merged;
 }
 
@@ -1465,6 +1608,7 @@ function applyStyleToBook(style) {
   if (sanitized.fontSize !== undefined) els.fontSizeOverride.value = sanitized.fontSize.toFixed(1);
   if (sanitized.letterSpacing !== undefined) els.letterSpacing.value = String(sanitized.letterSpacing);
   if (sanitized.lineHeight !== undefined) els.lineHeight.value = String(sanitized.lineHeight);
+  if (sanitized.align !== undefined) els.textAlign.value = sanitized.align;
   saveSettings();
   applySelectedFont();
   if (state.pages.length > 0) {
@@ -1472,6 +1616,7 @@ function applyStyleToBook(style) {
     applyTextStyleToPages();
     state.pages.forEach(refreshPageCard);
   }
+  scheduleSaveSession();
   setStatus("Applied saved style to the book.", 100);
 }
 
@@ -1479,12 +1624,14 @@ function applyStyleToPage(page, style) {
   page.styleOverride = sanitizeTextStyle(style);
   maybeLoadStyleFont(page.styleOverride);
   refreshPageCard(page);
+  scheduleSaveSession();
 }
 
 function applyStyleToLine(page, line, style) {
   line.styleOverride = sanitizeTextStyle(style);
   maybeLoadStyleFont(line.styleOverride);
   refreshPageCard(page);
+  scheduleSaveSession();
 }
 
 function maybeLoadStyleFont(style) {
@@ -1524,11 +1671,15 @@ function normalizeColor(value, fallback) {
   return /^#[0-9a-f]{6}$/i.test(value) ? value : fallback;
 }
 
+function normalizeAlign(value) {
+  return ["left", "center", "right"].includes(value) ? value : "center";
+}
+
 function defaultLine() {
   const textStyle = currentTextStyle();
   return {
     id: `line-${crypto.randomUUID()}`,
-    text: "Edit this text",
+    text: "New text",
     left: 20,
     top: 10,
     width: 60,
@@ -1540,6 +1691,7 @@ function defaultLine() {
     color: textStyle.color,
     letterSpacing: textStyle.letterSpacing,
     lineHeight: textStyle.lineHeight,
+    align: textStyle.align,
     fontFamily: fallbackFontName(),
     fontWeight: 400,
   };
@@ -1554,6 +1706,12 @@ function renderPageCard(pageState) {
   node.querySelector(".use-original").addEventListener("click", () => {
     pageState.cleanDataUrl = pageState.imageDataUrl;
     refreshPageCard(pageState);
+    scheduleSaveSession();
+  });
+  node.querySelector(".add-line").addEventListener("click", () => {
+    pageState.lines.push(defaultLine());
+    refreshPageCard(pageState);
+    scheduleSaveSession();
   });
   node.querySelector(".reclean").addEventListener("click", () => cleanPages([pageState]));
   els.pageGrid.appendChild(node);
@@ -1588,6 +1746,7 @@ function refreshPageCard(pageState) {
     box.addEventListener("input", () => {
       line.text = box.textContent.trim();
       updateLineList(pageState);
+      scheduleSaveSession();
     });
     makeDraggable(box, line, pageState);
     overlay.appendChild(box);
@@ -1632,6 +1791,15 @@ function renderPageStylePanel(pageState, node) {
         <span>Line height</span>
         <input class="page-line-height" type="number" min="0.8" max="2" step="0.05" placeholder="Inherit" value="${override.lineHeight ?? ""}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
       </label>
+      <label class="field">
+        <span>Align</span>
+        <select class="page-align">
+          <option value="">Inherit</option>
+          <option value="left"${override.align === "left" ? " selected" : ""}>Left</option>
+          <option value="center"${override.align === "center" ? " selected" : ""}>Center</option>
+          <option value="right"${override.align === "right" ? " selected" : ""}>Right</option>
+        </select>
+      </label>
     </div>
   `;
 
@@ -1654,6 +1822,7 @@ function renderPageStylePanel(pageState, node) {
   panel.querySelector(".reset-page-style").addEventListener("click", () => {
     pageState.styleOverride = {};
     refreshPageCard(pageState);
+    scheduleSaveSession();
   });
 
   fontSelect.addEventListener("change", () => {
@@ -1671,12 +1840,16 @@ function renderPageStylePanel(pageState, node) {
   panel.querySelector(".page-line-height").addEventListener("change", (event) => {
     updatePageStyleOverride(pageState, "lineHeight", event.target.value);
   });
+  panel.querySelector(".page-align").addEventListener("change", (event) => {
+    updatePageStyleOverride(pageState, "align", event.target.value);
+  });
 }
 
 function updatePageStyleOverride(pageState, field, value) {
   pageState.styleOverride = updateStyleField(pageState.styleOverride || {}, field, value);
   maybeLoadStyleFont(pageState.styleOverride);
   refreshPageCard(pageState);
+  scheduleSaveSession();
 }
 
 function pageCard(pageState) {
@@ -1693,6 +1866,7 @@ function applyLineStyle(box, line, pageState) {
   box.style.color = style.color;
   box.style.letterSpacing = `${style.letterSpacing ?? 0}cqw`;
   box.style.lineHeight = String(style.lineHeight ?? 1.05);
+  box.style.textAlign = style.align;
   box.style.fontFamily = selectedFontCssStack(style.fontName);
   box.style.fontWeight = String(style.fontWeight);
 }
@@ -1731,6 +1905,7 @@ function makeDraggable(box, line, pageState) {
     if (!start) return;
     start = null;
     updateLineList(pageState);
+    scheduleSaveSession();
   });
 }
 
@@ -1756,6 +1931,7 @@ function updateLineList(pageState) {
         <button class="small apply-line-style">Apply</button>
         <button class="small save-line-style">Save</button>
         <button class="small reset-line-style">Reset</button>
+        <button class="small delete-line">Delete</button>
       </div>
       <div class="style-grid line-override-grid">
         <label class="field">
@@ -1778,6 +1954,15 @@ function updateLineList(pageState) {
           <span>Line height</span>
           <input class="line-line-height" type="number" min="0.8" max="2" step="0.05" placeholder="Inherit" value="${override.lineHeight ?? ""}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
         </label>
+        <label class="field">
+          <span>Align</span>
+          <select class="line-align">
+            <option value="">Inherit</option>
+            <option value="left"${override.align === "left" ? " selected" : ""}>Left</option>
+            <option value="center"${override.align === "center" ? " selected" : ""}>Center</option>
+            <option value="right"${override.align === "right" ? " selected" : ""}>Right</option>
+          </select>
+        </label>
       </div>
     `;
     const [textInput, leftInput, topInput] = row.querySelectorAll(".line-row input");
@@ -1788,14 +1973,17 @@ function updateLineList(pageState) {
     textInput.addEventListener("input", () => {
       line.text = textInput.value;
       refreshPageCard(pageState);
+      scheduleSaveSession();
     });
     leftInput.addEventListener("input", () => {
       line.left = clamp(Number(leftInput.value), 0, 100 - line.width);
       refreshPageCard(pageState);
+      scheduleSaveSession();
     });
     topInput.addEventListener("input", () => {
       line.top = clamp(Number(topInput.value), 0, 100 - line.height);
       refreshPageCard(pageState);
+      scheduleSaveSession();
     });
     row.querySelector(".apply-line-style").addEventListener("click", () => {
       const saved = selectedSavedStyle(savedSelect.value);
@@ -1808,6 +1996,12 @@ function updateLineList(pageState) {
     row.querySelector(".reset-line-style").addEventListener("click", () => {
       line.styleOverride = {};
       refreshPageCard(pageState);
+      scheduleSaveSession();
+    });
+    row.querySelector(".delete-line").addEventListener("click", () => {
+      pageState.lines = pageState.lines.filter((candidate) => candidate.id !== line.id);
+      refreshPageCard(pageState);
+      scheduleSaveSession();
     });
     fontSelect.addEventListener("change", () => {
       updateLineStyleOverride(pageState, line, "fontName", fontSelect.value);
@@ -1824,6 +2018,9 @@ function updateLineList(pageState) {
     row.querySelector(".line-line-height").addEventListener("change", (event) => {
       updateLineStyleOverride(pageState, line, "lineHeight", event.target.value);
     });
+    row.querySelector(".line-align").addEventListener("change", (event) => {
+      updateLineStyleOverride(pageState, line, "align", event.target.value);
+    });
     list.appendChild(row);
   });
 }
@@ -1832,6 +2029,7 @@ function updateLineStyleOverride(pageState, line, field, value) {
   line.styleOverride = updateStyleField(line.styleOverride || {}, field, value);
   maybeLoadStyleFont(line.styleOverride);
   refreshPageCard(pageState);
+  scheduleSaveSession();
 }
 
 async function cleanPages(pages) {
@@ -1852,11 +2050,13 @@ async function cleanPages(pages) {
     try {
       page.cleanDataUrl = await cleanPage(page, mode, apiKey);
       refreshPageCard(page);
+      scheduleSaveSession();
       setStatus(`Applied ${cleanupModeLabel(mode)} to page ${page.pageNumber}.`, ((i + 1) / pages.length) * 100);
     } catch (error) {
       failed += 1;
       page.cleanDataUrl = page.cleanDataUrl || page.imageDataUrl;
       refreshPageCard(page);
+      scheduleSaveSession();
       setStatus(`Skipped page ${page.pageNumber}: ${summarizeError(error)}`, ((i + 1) / pages.length) * 100);
     }
   }
@@ -2058,10 +2258,12 @@ async function exportLayeredPdf() {
       if (typeof doc.setCharSpace === "function") {
         doc.setCharSpace(((style.letterSpacing ?? 0) / 100) * page.width);
       }
-      const x = (line.left / 100) * page.width + ((line.width / 100) * page.width) / 2;
+      const lineLeft = (line.left / 100) * page.width;
+      const lineWidth = (line.width / 100) * page.width;
+      const x = lineTextAnchor(lineLeft, lineWidth, style.align);
       const y = (line.top / 100) * page.height + fontSize;
       doc.text(line.text, x, y, {
-        align: "center",
+        align: style.align,
       });
     }
   });
@@ -2121,7 +2323,7 @@ async function exportPowerPoint() {
         fontSize: Math.max(8, (style.fontSize / 100) * pptx.width * 72),
         color: style.color.replace("#", ""),
         charSpacing,
-        align: "center",
+        align: style.align,
         valign: "mid",
         margin: 0,
         fit: "shrink",
@@ -2131,6 +2333,12 @@ async function exportPowerPoint() {
   }
   await pptx.writeFile({ fileName: "storybook-editable.pptx" });
   setStatus("Exported PowerPoint.", 100);
+}
+
+function lineTextAnchor(left, width, align) {
+  if (align === "left") return left;
+  if (align === "right") return left + width;
+  return left + width / 2;
 }
 
 function roundRect(ctx, x, y, width, height, radius) {

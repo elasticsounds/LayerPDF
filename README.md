@@ -61,13 +61,14 @@ spend controls.
 6. Tune the OCR confidence, white backing filter, and optional text size
    override when illustrated backgrounds create false text boxes.
 7. Use the text style panel to choose the book-level font, custom TTF/OTF,
-   color, size, kerning, and line height before rendering. **Match book font**
-   is the default; with PDF native text it tries to map embedded PDF font names
-   to the closest available web font for each line.
+   color, size, kerning, line height, and alignment before rendering. **Match
+   book font** is the default; with PDF native text it tries to map embedded PDF
+   font names to the closest available web font for each line.
 8. Run **Render & OCR**.
-9. Drag/edit text boxes in the review screen. You can override style at the
-   page level or on individual text boxes, then save reusable styles for the
-   rest of the book.
+9. Drag/edit, add, or delete text boxes in the review screen. Pages with no OCR
+   text stay empty until you add a text box. You can override style at the page
+   level or on individual text boxes, then save reusable styles for the rest of
+   the book.
 10. Choose a cleanup mode and run **Apply Cleanup Mode**.
 11. Export a layered PDF or editable PowerPoint.
 
@@ -89,9 +90,10 @@ spend controls.
   single full-page background image, so tiled scanned pages are consolidated
   before text cleanup. Mixed digital textbooks with real PDF text and tiled
   figures will need a later object-level path.
-- The app persists settings in local storage and the most recent PDF in
-  IndexedDB. Browsers do not allow file inputs to be visually refilled after a
-  refresh, so the picker may look empty even when the PDF is restored.
+- The app persists settings in local storage and the most recent PDF, rendered
+  pages, cleaned images, text boxes, positions, and style overrides in IndexedDB.
+  Browsers do not allow file inputs to be visually refilled after a refresh, so
+  the picker may look empty even when the PDF and workspace are restored.
 - OCR filtering rejects low-confidence lines, oversized boxes, tiny fragments,
   non-text-like strings, and optional non-white-backed regions.
 - Detected text sizes are normalized across the processed batch unless a text
@@ -104,7 +106,8 @@ spend controls.
   PDF embedding, and the most recent uploaded font is saved in IndexedDB.
 - Text styling cascades from book style to page override to text-box override.
   Saved text styles are kept in local storage and can be applied back to the
-  whole book, a single page, or a single text box.
+  whole book, a single page, or a single text box. Style controls include font,
+  color, size, kerning, line height, and alignment.
 - Browser-side layered PDF export can only embed the bundled Mouse Memoirs font
   or a user-uploaded custom TTF/OTF. Native PDF font matches that are not
   uploaded may fall back to PDF core fonts in the exported PDF.

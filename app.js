@@ -1972,6 +1972,7 @@ function defaultLine() {
 function renderPageCard(pageState) {
   const node = els.pageTemplate.content.firstElementChild.cloneNode(true);
   node.dataset.page = String(pageState.pageNumber);
+  applyPageAspectRatio(node, pageState);
   node.querySelector(".page-title").textContent = `Page ${pageState.pageNumber}`;
   node.querySelector(".page-image").src = pageState.cleanDataUrl;
   node.querySelector(".page-image").alt = `Page ${pageState.pageNumber}`;
@@ -2004,6 +2005,7 @@ function refreshPageCard(pageState) {
     title.textContent = `Page ${pageState.pageNumber}${tileLabel}`;
   }
   node.querySelector("summary").textContent = `Text boxes (${pageState.lines.length})`;
+  applyPageAspectRatio(node, pageState);
   node.querySelector(".page-image").src = pageState.cleanDataUrl;
   renderPageStylePanel(pageState, node);
   const overlay = node.querySelector(".overlay-layer");
@@ -2024,6 +2026,15 @@ function refreshPageCard(pageState) {
     overlay.appendChild(box);
   }
   updateLineList(pageState);
+}
+
+function applyPageAspectRatio(node, pageState) {
+  const preview = node.querySelector(".page-preview");
+  if (!preview) return;
+  const width = Number(pageState.width);
+  const height = Number(pageState.height);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+  preview.style.setProperty("--page-aspect-ratio", `${width} / ${height}`);
 }
 
 function renderPageStylePanel(pageState, node) {

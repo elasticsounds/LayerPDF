@@ -280,7 +280,7 @@ textarea {
 .page-preview {
   position: relative;
   width: 100%;
-  aspect-ratio: 1 / 1;
+  aspect-ratio: var(--page-aspect-ratio, 1 / 1);
   overflow: hidden;
   container-type: inline-size;
   background: #eceff1;

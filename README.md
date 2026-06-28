@@ -48,29 +48,31 @@ spend controls.
 ## Current Workflow
 
 1. Upload a scanned PDF.
-2. Choose the story page range.
-3. Optionally choose tile handling. It is disabled by default; Auto mode detects
+2. Save it as a local project if you want to reopen the same PDF, settings, and
+   edited workspace later.
+3. Choose the story page range.
+4. Optionally choose tile handling. It is disabled by default; Auto mode detects
    pages with many image fragments and flags them as consolidated through the
    full-page render before OCR.
-4. Choose the OCR/text engine. **PDF native text** extracts positioned text from
+5. Choose the OCR/text engine. **PDF native text** extracts positioned text from
    the PDF for textbook-style files; Browser Tesseract runs fully locally;
    Gemini vision OCR uses a Gemini API key to detect story text and boxes from
    the page image.
-5. Choose the OCR language. The picker includes the full practical Tesseract
+6. Choose the OCR language. The picker includes the full practical Tesseract
    traineddata language set, and Albanian uses the `sqi` language model.
-6. Tune the OCR confidence, white backing filter, and optional text size
+7. Tune the OCR confidence, white backing filter, and optional text size
    override when illustrated backgrounds create false text boxes.
-7. Use the text style panel to choose the book-level font, custom TTF/OTF,
+8. Use the text style panel to choose the book-level font, custom TTF/OTF,
    color, size, kerning, line height, and alignment before rendering. **Match
    book font** is the default; with PDF native text it tries to map embedded PDF
    font names to the closest available web font for each line.
-8. Run **Render & OCR**.
-9. Drag/edit, add, or delete text boxes in the review screen. Pages with no OCR
+9. Run **Render & OCR**.
+10. Drag/edit, add, or delete text boxes in the review screen. Pages with no OCR
    text stay empty until you add a text box. You can override style at the page
    level or on individual text boxes, then save reusable styles for the rest of
    the book.
-10. Choose a cleanup mode and run **Apply Cleanup Mode**.
-11. Export a layered PDF or editable PowerPoint.
+11. Choose a cleanup mode and run **Apply Cleanup Mode**.
+12. Export a layered PDF or editable PowerPoint.
 
 ## Notes
 
@@ -94,6 +96,10 @@ spend controls.
   pages, cleaned images, text boxes, positions, and style overrides in IndexedDB.
   Browsers do not allow file inputs to be visually refilled after a refresh, so
   the picker may look empty even when the PDF and workspace are restored.
+- Projects are local to the current browser. A project stores the PDF, settings,
+  rendered workspace, text boxes, style overrides, saved text styles, and custom
+  font data when available. Projects can be reopened or deleted from the
+  Projects panel without sending files to a server.
 - OCR filtering rejects low-confidence lines, oversized boxes, tiny fragments,
   non-text-like strings, and optional non-white-backed regions.
 - Detected text sizes are normalized across the processed batch unless a text

@@ -12,10 +12,13 @@ const state = {
   bundledFontBase64: null,
   customFontUrl: null,
   textStyles: [],
+  projects: [],
+  currentProjectId: null,
 };
 
 const SETTINGS_KEY = "layerpdf.settings.v1";
 const TEXT_STYLES_KEY = "layerpdf.textStyles.v1";
+const PROJECT_INDEX_KEY = "layerpdf.projects.v1";
 const SETTINGS_VERSION = 4;
 const DB_NAME = "layerpdf";
 const DB_VERSION = 1;
@@ -23,6 +26,7 @@ const PDF_STORE = "files";
 const LAST_PDF_ID = "lastPdf";
 const LAST_FONT_ID = "lastFont";
 const LAST_SESSION_ID = "lastSession";
+const PROJECT_RECORD_PREFIX = "project:";
 const CUSTOM_FONT_VALUE = "Custom story font";
 const MATCH_BOOK_FONT_VALUE = "__match_book__";
 
@@ -197,6 +201,12 @@ const OCR_LANGUAGES = [
 
 const els = {
   pdfInput: $("pdfInput"),
+  projectSelect: $("projectSelect"),
+  projectName: $("projectName"),
+  openProjectBtn: $("openProjectBtn"),
+  saveProjectBtn: $("saveProjectBtn"),
+  newProjectBtn: $("newProjectBtn"),
+  deleteProjectBtn: $("deleteProjectBtn"),
   pageRange: $("pageRange"),
   tileMode: $("tileMode"),
   ocrEngine: $("ocrEngine"),
@@ -236,6 +246,9 @@ const els = {
 
 els.pdfInput.addEventListener("change", () => {
   state.pdfFile = els.pdfInput.files?.[0] ?? null;
+  state.currentProjectId = null;
+  els.projectSelect.value = "";
+  els.projectName.value = state.pdfFile ? projectNameFromPdf(state.pdfFile.name) : "";
   els.workspaceTitle.textContent = state.pdfFile ? state.pdfFile.name : "No PDF loaded";
   state.pages = [];
   els.pageGrid.innerHTML = "";
@@ -246,6 +259,27 @@ els.pdfInput.addEventListener("change", () => {
       setStatus("PDF loaded, but this browser could not save it for refresh.");
     });
   }
+});
+
+els.openProjectBtn.addEventListener("click", () => {
+  openSelectedProject().catch((error) => {
+    setStatus(`Could not open project: ${summarizeError(error)}`);
+  });
+});
+els.saveProjectBtn.addEventListener("click", () => {
+  saveCurrentProject().catch((error) => {
+    setStatus(`Could not save project: ${summarizeError(error)}`);
+  });
+});
+els.newProjectBtn.addEventListener("click", () => {
+  startNewProject().catch((error) => {
+    setStatus(`Could not start a new project: ${summarizeError(error)}`);
+  });
+});
+els.deleteProjectBtn.addEventListener("click", () => {
+  deleteSelectedProject().catch((error) => {
+    setStatus(`Could not delete project: ${summarizeError(error)}`);
+  });
 });
 
 els.fontFile.addEventListener("change", async () => {
@@ -322,6 +356,8 @@ function populateOcrLanguages() {
 
 function initializePersistence() {
   restoreSettings();
+  restoreProjectIndex();
+  refreshProjectSelect();
   bindPersistentSettings();
   restoreLastPdf();
   restoreLastSession();
@@ -395,6 +431,226 @@ function saveSettings() {
     settings[field.id] = field.type === "checkbox" ? field.checked : field.value;
   }
   localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function captureSettings() {
+  const settings = { settingsVersion: SETTINGS_VERSION };
+  for (const field of persistentFields()) {
+    settings[field.id] = field.type === "checkbox" ? field.checked : field.value;
+  }
+  return settings;
+}
+
+function applySettings(settings = {}) {
+  for (const field of persistentFields()) {
+    if (!(field.id in settings)) continue;
+    if (field.type === "checkbox") {
+      field.checked = Boolean(settings[field.id]);
+    } else {
+      field.value = String(settings[field.id] ?? "");
+    }
+  }
+  saveSettings();
+  applySelectedFont();
+}
+
+function restoreProjectIndex() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PROJECT_INDEX_KEY) || "[]");
+    state.projects = Array.isArray(parsed)
+      ? parsed
+          .map((project) => ({
+            id: String(project.id || ""),
+            name: String(project.name || "Untitled project").trim() || "Untitled project",
+            pdfName: String(project.pdfName || ""),
+            pageCount: Number(project.pageCount) || 0,
+            updatedAt: Number(project.updatedAt) || 0,
+          }))
+          .filter((project) => project.id)
+      : [];
+  } catch {
+    state.projects = [];
+  }
+}
+
+function persistProjectIndex() {
+  localStorage.setItem(PROJECT_INDEX_KEY, JSON.stringify(state.projects));
+}
+
+function refreshProjectSelect() {
+  els.projectSelect.innerHTML = "";
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = state.projects.length === 0 ? "No saved projects" : "Choose a project";
+  els.projectSelect.appendChild(placeholder);
+  const sortedProjects = [...state.projects].sort((a, b) => b.updatedAt - a.updatedAt);
+  for (const project of sortedProjects) {
+    const option = document.createElement("option");
+    option.value = project.id;
+    option.textContent = `${project.name}${project.pdfName ? ` (${project.pdfName})` : ""}`;
+    els.projectSelect.appendChild(option);
+  }
+  els.projectSelect.value = state.currentProjectId || "";
+}
+
+async function saveCurrentProject(options = {}) {
+  const { silent = false, allowCreate = true } = options;
+  if (!state.pdfFile) {
+    if (!silent) setStatus("Choose a PDF before saving a project.");
+    return null;
+  }
+  if (!state.currentProjectId && !allowCreate) return null;
+  const projectId = state.currentProjectId || crypto.randomUUID();
+  const projectName = (els.projectName.value || projectNameFromPdf(state.pdfFile.name)).trim() || "Untitled project";
+  const record = await buildProjectRecord(projectId, projectName);
+  await writeProjectRecord(record);
+  state.currentProjectId = projectId;
+  upsertProjectSummary(record);
+  persistProjectIndex();
+  refreshProjectSelect();
+  await saveLastPdf(state.pdfFile);
+  await saveCurrentSession({ updateProject: false });
+  if (!silent) setStatus(`Saved project "${record.name}".`, 100);
+  return record;
+}
+
+async function buildProjectRecord(projectId, projectName) {
+  const pdfBlob = state.pdfFile;
+  return {
+    id: projectRecordId(projectId),
+    projectId,
+    name: projectName,
+    pdfName: pdfBlob.name,
+    pdfType: pdfBlob.type || "application/pdf",
+    pdfLastModified: pdfBlob.lastModified || Date.now(),
+    pdfBlob,
+    settings: captureSettings(),
+    pages: state.pages.map(serializePageState),
+    textStyles: state.textStyles,
+    selectedFontBase64: state.selectedFontBase64,
+    updatedAt: Date.now(),
+  };
+}
+
+async function writeProjectRecord(record) {
+  const db = await openLayerDb();
+  await putRecord(db, PDF_STORE, record);
+}
+
+function upsertProjectSummary(record) {
+  const summary = {
+    id: record.projectId,
+    name: record.name,
+    pdfName: record.pdfName,
+    pageCount: record.pages?.length || 0,
+    updatedAt: record.updatedAt,
+  };
+  state.projects = [summary, ...state.projects.filter((project) => project.id !== summary.id)];
+}
+
+async function openSelectedProject() {
+  const projectId = els.projectSelect.value;
+  if (!projectId) {
+    setStatus("Choose a saved project to open.");
+    return;
+  }
+  const record = await readProjectRecord(projectId);
+  if (!record) {
+    setStatus("That project could not be found in this browser.");
+    return;
+  }
+  await openProjectRecord(record);
+}
+
+async function openProjectRecord(record) {
+  applySettings(record.settings || {});
+  state.currentProjectId = record.projectId;
+  els.projectName.value = record.name || projectNameFromPdf(record.pdfName || "Untitled.pdf");
+  els.projectSelect.value = state.currentProjectId;
+  state.pdfFile = new File([record.pdfBlob], record.pdfName || "project.pdf", {
+    type: record.pdfType || "application/pdf",
+    lastModified: record.pdfLastModified || Date.now(),
+  });
+  state.pdf = null;
+  state.textStyles = Array.isArray(record.textStyles) ? record.textStyles : state.textStyles;
+  persistTextStyles();
+  refreshStyleLibraryControls();
+  if (record.selectedFontBase64) {
+    state.selectedFontBase64 = record.selectedFontBase64;
+    ensureCustomFontOption();
+    addFontFace(CUSTOM_FONT_VALUE, `data:font/ttf;base64,${record.selectedFontBase64}`);
+  }
+  state.pages = Array.isArray(record.pages) ? record.pages.map(normalizeSavedPageState).filter(Boolean) : [];
+  els.workspaceTitle.textContent = state.pdfFile.name;
+  els.pageGrid.innerHTML = "";
+  els.emptyState.hidden = state.pages.length > 0;
+  for (const page of state.pages) {
+    renderPageCard(page);
+    refreshPageCard(page);
+  }
+  await saveLastPdf(state.pdfFile);
+  await saveCurrentSession({ updateProject: false });
+  setStatus(`Opened project "${record.name}".`, 100);
+}
+
+async function readProjectRecord(projectId) {
+  const db = await openLayerDb();
+  return getRecord(db, PDF_STORE, projectRecordId(projectId));
+}
+
+async function deleteSelectedProject() {
+  const projectId = els.projectSelect.value;
+  if (!projectId) {
+    setStatus("Choose a saved project to delete.");
+    return;
+  }
+  const project = state.projects.find((item) => item.id === projectId);
+  const name = project?.name || "this project";
+  if (!window.confirm(`Delete "${name}" from this browser?`)) return;
+  const db = await openLayerDb();
+  await deleteRecord(db, PDF_STORE, projectRecordId(projectId));
+  state.projects = state.projects.filter((item) => item.id !== projectId);
+  persistProjectIndex();
+  if (state.currentProjectId === projectId) {
+    state.currentProjectId = null;
+    state.pdfFile = null;
+    state.pdf = null;
+    state.pages = [];
+    els.projectName.value = "";
+    els.pdfInput.value = "";
+    els.workspaceTitle.textContent = "No PDF loaded";
+    els.pageGrid.innerHTML = "";
+    els.emptyState.hidden = false;
+    await clearSavedSession();
+    await clearSavedPdf();
+  }
+  refreshProjectSelect();
+  setStatus(`Deleted project "${name}".`, 100);
+}
+
+async function startNewProject() {
+  if (state.pages.length > 0 && !window.confirm("Start a new project and clear the current workspace?")) return;
+  state.currentProjectId = null;
+  state.pdfFile = null;
+  state.pdf = null;
+  state.pages = [];
+  els.projectName.value = "";
+  els.projectSelect.value = "";
+  els.pdfInput.value = "";
+  els.workspaceTitle.textContent = "No PDF loaded";
+  els.pageGrid.innerHTML = "";
+  els.emptyState.hidden = false;
+  await clearSavedSession();
+  await clearSavedPdf();
+  setStatus("New project ready. Choose a PDF to begin.", 0);
+}
+
+function projectRecordId(projectId) {
+  return `${PROJECT_RECORD_PREFIX}${projectId}`;
+}
+
+function projectNameFromPdf(name) {
+  return String(name || "Untitled book").replace(/\.pdf$/i, "").trim() || "Untitled book";
 }
 
 function restoreTextStyles() {
@@ -531,6 +787,11 @@ async function readSavedPdf() {
   return getRecord(db, PDF_STORE, LAST_PDF_ID);
 }
 
+async function clearSavedPdf() {
+  const db = await openLayerDb();
+  await deleteRecord(db, PDF_STORE, LAST_PDF_ID);
+}
+
 async function restoreLastFont() {
   try {
     const saved = await readSavedFont();
@@ -572,7 +833,8 @@ function scheduleSaveSession() {
   }, 500);
 }
 
-async function saveCurrentSession() {
+async function saveCurrentSession(options = {}) {
+  const { updateProject = true } = options;
   if (state.pages.length === 0) {
     await clearSavedSession();
     return;
@@ -580,11 +842,16 @@ async function saveCurrentSession() {
   const record = {
     id: LAST_SESSION_ID,
     savedAt: Date.now(),
+    projectId: state.currentProjectId,
     pdfName: state.pdfFile?.name || els.workspaceTitle.textContent || "Restored PDF",
+    settings: captureSettings(),
     pages: state.pages.map(serializePageState),
   };
   const db = await openLayerDb();
   await putRecord(db, PDF_STORE, record);
+  if (updateProject && state.currentProjectId && state.pdfFile) {
+    await saveCurrentProject({ silent: true, allowCreate: false });
+  }
 }
 
 function serializePageState(page) {
@@ -632,9 +899,14 @@ async function restoreLastSession() {
     if (!saved?.pages?.length || state.pages.length > 0) return;
     state.pages = saved.pages.map(normalizeSavedPageState).filter(Boolean);
     if (state.pages.length === 0) return;
+    if (saved.settings) applySettings(saved.settings);
+    state.currentProjectId = saved.projectId || null;
     els.pageGrid.innerHTML = "";
     els.emptyState.hidden = true;
     els.workspaceTitle.textContent = saved.pdfName || state.pdfFile?.name || "Restored workspace";
+    const project = state.projects.find((item) => item.id === state.currentProjectId);
+    els.projectName.value = project?.name || projectNameFromPdf(saved.pdfName || "");
+    refreshProjectSelect();
     for (const page of state.pages) {
       renderPageCard(page);
       refreshPageCard(page);

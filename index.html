@@ -18,7 +18,26 @@
         </div>
 
         <div class="panel">
-          <h2>1. Source</h2>
+          <h2>1. Projects</h2>
+          <label class="field">
+            <span>Saved projects</span>
+            <select id="projectSelect"></select>
+          </label>
+          <label class="field">
+            <span>Project name</span>
+            <input id="projectName" type="text" placeholder="Untitled book" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" data-bwignore="true" data-form-type="other" />
+          </label>
+          <div class="project-actions">
+            <button id="openProjectBtn" class="small">Open</button>
+            <button id="saveProjectBtn" class="small">Save Project</button>
+            <button id="newProjectBtn" class="small">New</button>
+            <button id="deleteProjectBtn" class="small danger">Delete</button>
+          </div>
+          <p class="hint">Projects are stored locally in this browser.</p>
+        </div>
+
+        <div class="panel">
+          <h2>2. Source</h2>
           <label class="field">
             <span>Scanned PDF</span>
             <input id="pdfInput" type="file" accept="application/pdf" />
@@ -72,7 +91,7 @@
         </div>
 
         <div class="panel">
-          <h2>2. Text Style</h2>
+          <h2>3. Text Style</h2>
           <label class="field">
             <span>Saved style</span>
             <select id="bookStyleSelect"></select>
@@ -139,7 +158,7 @@
         </div>
 
         <div class="panel">
-          <h2>3. Clean Images</h2>
+          <h2>4. Clean Images</h2>
           <label class="field">
             <span>Cleanup mode</span>
             <select id="cleanupMode">
@@ -187,7 +206,7 @@
         </div>
 
         <div class="panel">
-          <h2>4. Export</h2>
+          <h2>5. Export</h2>
           <p class="hint">The selected font is used for preview and export. Upload a TTF/OTF when the PDF needs an exact custom embedded font.</p>
           <div class="button-row">
             <button id="exportPdfBtn" class="primary">Layered PDF</button>

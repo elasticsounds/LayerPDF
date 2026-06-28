@@ -174,6 +174,17 @@ textarea {
   gap: 8px;
 }
 
+.project-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.danger {
+  color: #fff;
+  background: #8d3938;
+}
+
 .hint {
   margin-top: 10px;
   font-size: 12px;

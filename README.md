@@ -71,8 +71,10 @@ spend controls.
    text stay empty until you add a text box. You can override style at the page
    level or on individual text boxes, then save reusable styles for the rest of
    the book.
-11. Choose a cleanup mode and run **Apply Cleanup Mode**.
-12. Export a layered PDF or editable PowerPoint.
+11. Use each thumbnail's **Page actions** dropdown to enter page edit mode, add
+   text, restore the original image, or remove text from that page's background.
+12. Choose a cleanup mode and run **Apply Cleanup Mode**.
+13. Export a layered PDF or editable PowerPoint.
 
 ## Notes
 

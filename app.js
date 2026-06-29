@@ -14,6 +14,7 @@ const state = {
   textStyles: [],
   projects: [],
   currentProjectId: null,
+  editingPageNumber: null,
 };
 
 const SETTINGS_KEY = "layerpdf.settings.v1";
@@ -251,7 +252,9 @@ els.pdfInput.addEventListener("change", () => {
   els.projectName.value = state.pdfFile ? projectNameFromPdf(state.pdfFile.name) : "";
   els.workspaceTitle.textContent = state.pdfFile ? state.pdfFile.name : "No PDF loaded";
   state.pages = [];
+  state.editingPageNumber = null;
   els.pageGrid.innerHTML = "";
+  els.pageGrid.classList.remove("edit-mode");
   els.emptyState.hidden = false;
   clearSavedSession().catch(() => {});
   if (state.pdfFile) {
@@ -581,8 +584,10 @@ async function openProjectRecord(record) {
     addFontFace(CUSTOM_FONT_VALUE, `data:font/ttf;base64,${record.selectedFontBase64}`);
   }
   state.pages = Array.isArray(record.pages) ? record.pages.map(normalizeSavedPageState).filter(Boolean) : [];
+  state.editingPageNumber = null;
   els.workspaceTitle.textContent = state.pdfFile.name;
   els.pageGrid.innerHTML = "";
+  els.pageGrid.classList.remove("edit-mode");
   els.emptyState.hidden = state.pages.length > 0;
   for (const page of state.pages) {
     renderPageCard(page);
@@ -616,10 +621,12 @@ async function deleteSelectedProject() {
     state.pdfFile = null;
     state.pdf = null;
     state.pages = [];
+    state.editingPageNumber = null;
     els.projectName.value = "";
     els.pdfInput.value = "";
     els.workspaceTitle.textContent = "No PDF loaded";
     els.pageGrid.innerHTML = "";
+    els.pageGrid.classList.remove("edit-mode");
     els.emptyState.hidden = false;
     await clearSavedSession();
     await clearSavedPdf();
@@ -634,11 +641,13 @@ async function startNewProject() {
   state.pdfFile = null;
   state.pdf = null;
   state.pages = [];
+  state.editingPageNumber = null;
   els.projectName.value = "";
   els.projectSelect.value = "";
   els.pdfInput.value = "";
   els.workspaceTitle.textContent = "No PDF loaded";
   els.pageGrid.innerHTML = "";
+  els.pageGrid.classList.remove("edit-mode");
   els.emptyState.hidden = false;
   await clearSavedSession();
   await clearSavedPdf();
@@ -1106,7 +1115,9 @@ async function renderAndOcr() {
     return;
   }
   state.pages = [];
+  state.editingPageNumber = null;
   els.pageGrid.innerHTML = "";
+  els.pageGrid.classList.remove("edit-mode");
   els.emptyState.hidden = true;
 
   const bytes = await state.pdfFile.arrayBuffer();
@@ -1751,11 +1762,10 @@ function normalizeFontSizes(pages) {
     .map((line) => line.rawFontSize)
     .filter((value) => Number.isFinite(value) && value > 0);
   const fontSize = override ?? clamp(median(detectedSizes) ?? 3.6, 2.4, 4.8);
-  const lineHeight = currentTextStyle().lineHeight;
   for (const page of pages) {
     for (const line of page.lines) {
       line.fontSize = fontSize;
-      line.height = Math.max(line.rawHeight ?? line.height, fontSize * lineHeight);
+      line.height = singleLineStoredHeight(line);
       applyTextStyleToLine(line);
     }
   }
@@ -1797,7 +1807,7 @@ function applyTextStyleToLine(line) {
   line.letterSpacing = style.letterSpacing;
   line.lineHeight = style.lineHeight;
   line.align = style.align;
-  line.height = Math.max(line.rawHeight ?? line.height, line.fontSize * style.lineHeight);
+  line.height = singleLineStoredHeight(line);
 }
 
 function sanitizeTextStyle(style) {
@@ -1976,18 +1986,66 @@ function renderPageCard(pageState) {
   node.querySelector(".page-title").textContent = `Page ${pageState.pageNumber}`;
   node.querySelector(".page-image").src = pageState.cleanDataUrl;
   node.querySelector(".page-image").alt = `Page ${pageState.pageNumber}`;
-  node.querySelector(".use-original").addEventListener("click", () => {
+  node.querySelector(".page-shortcuts").addEventListener("change", (event) => {
+    const action = event.target.value;
+    event.target.value = "";
+    handlePageShortcut(pageState, action);
+  });
+  node.querySelector(".exit-edit").addEventListener("click", () => setPageEditMode(null));
+  els.pageGrid.appendChild(node);
+  updatePageEditModeUi();
+}
+
+function handlePageShortcut(pageState, action) {
+  if (!action) return;
+  if (action === "edit") {
+    setPageEditMode(pageState);
+    return;
+  }
+  if (action === "addText") {
+    pageState.lines.push(defaultLine());
+    refreshPageCard(pageState);
+    setPageEditMode(pageState);
+    scheduleSaveSession();
+    return;
+  }
+  if (action === "restoreOriginal") {
     pageState.cleanDataUrl = pageState.imageDataUrl;
     refreshPageCard(pageState);
     scheduleSaveSession();
-  });
-  node.querySelector(".add-line").addEventListener("click", () => {
-    pageState.lines.push(defaultLine());
-    refreshPageCard(pageState);
-    scheduleSaveSession();
-  });
-  node.querySelector(".reclean").addEventListener("click", () => cleanPages([pageState]));
-  els.pageGrid.appendChild(node);
+    setStatus(`Restored original image for page ${pageState.pageNumber}.`, 100);
+    return;
+  }
+  if (action === "removeText") {
+    cleanPages([pageState]);
+  }
+}
+
+function setPageEditMode(pageState) {
+  state.editingPageNumber = pageState?.pageNumber ?? null;
+  updatePageEditModeUi();
+  if (pageState) {
+    pageCard(pageState)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setStatus(`Editing page ${pageState.pageNumber}. Use Done to return to all pages.`, 100);
+  } else {
+    setStatus("Returned to page thumbnails.", 100);
+  }
+}
+
+function updatePageEditModeUi() {
+  const editingPageNumber = state.editingPageNumber;
+  els.pageGrid.classList.toggle("edit-mode", editingPageNumber !== null);
+  for (const page of state.pages) {
+    const node = pageCard(page);
+    if (!node) continue;
+    const isEditing = page.pageNumber === editingPageNumber;
+    node.hidden = editingPageNumber !== null && !isEditing;
+    node.classList.toggle("is-editing", isEditing);
+    const doneButton = node.querySelector(".exit-edit");
+    if (doneButton) doneButton.hidden = !isEditing;
+    const details = node.querySelector("details");
+    if (details && isEditing) details.open = true;
+  }
 }
 
 function refreshPageCard(pageState) {
@@ -2017,8 +2075,13 @@ function refreshPageCard(pageState) {
     box.spellcheck = false;
     box.textContent = line.text;
     applyLineStyle(box, line, pageState);
+    box.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") event.preventDefault();
+    });
     box.addEventListener("input", () => {
-      line.text = box.textContent.trim();
+      const oneLineText = box.textContent.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+      if (box.textContent !== oneLineText) box.textContent = oneLineText;
+      line.text = oneLineText;
       updateLineList(pageState);
       scheduleSaveSession();
     });
@@ -2026,6 +2089,7 @@ function refreshPageCard(pageState) {
     overlay.appendChild(box);
   }
   updateLineList(pageState);
+  updatePageEditModeUi();
 }
 
 function applyPageAspectRatio(node, pageState) {
@@ -2035,6 +2099,7 @@ function applyPageAspectRatio(node, pageState) {
   const height = Number(pageState.height);
   if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
   preview.style.setProperty("--page-aspect-ratio", `${width} / ${height}`);
+  preview.style.setProperty("--page-aspect-ratio-number", String(width / height));
 }
 
 function renderPageStylePanel(pageState, node) {
@@ -2144,7 +2209,7 @@ function applyLineStyle(box, line, pageState) {
   box.style.left = `${line.left}%`;
   box.style.top = `${line.top}%`;
   box.style.width = `${line.width}%`;
-  box.style.height = `${effectiveLineBoxHeight(line, style)}%`;
+  box.style.height = `${effectiveLineBoxHeight(line, style, pageState)}%`;
   box.style.fontSize = `${style.fontSize}cqw`;
   box.style.color = style.color;
   box.style.letterSpacing = `${style.letterSpacing ?? 0}cqw`;
@@ -2154,8 +2219,20 @@ function applyLineStyle(box, line, pageState) {
   box.style.fontWeight = String(style.fontWeight);
 }
 
-function effectiveLineBoxHeight(line, style) {
-  return Math.max(line.rawHeight ?? line.height, style.fontSize * (style.lineHeight ?? 1.05));
+function effectiveLineBoxHeight(line, style, pageState) {
+  const detectedHeight = singleLineStoredHeight(line);
+  const aspect = pageState && pageState.height > 0 ? pageState.width / pageState.height : 1;
+  const fontSize = Number(style.fontSize ?? line.fontSize ?? line.rawFontSize);
+  const lineHeight = Number(style.lineHeight ?? line.lineHeight ?? 1.05);
+  const fontLineHeight = Number.isFinite(fontSize) ? fontSize * aspect * clamp(lineHeight, 0.8, 1.15) : 0;
+  return clamp(Math.max(detectedHeight, fontLineHeight), 0.4, 24);
+}
+
+function singleLineStoredHeight(line) {
+  const rawHeight = Number(line.rawHeight);
+  const currentHeight = Number(line.height);
+  const height = Number.isFinite(rawHeight) && rawHeight > 0 ? rawHeight : currentHeight;
+  return clamp(Number.isFinite(height) ? height : 2.4, 0.4, 100);
 }
 
 function selectedFontCssStack(fontName = selectedFontName()) {
@@ -2410,7 +2487,7 @@ async function locallyFillWhiteText(page) {
 
 function paddedLineRect(page, line) {
   const style = effectiveLineStyle(page, line);
-  const lineHeight = effectiveLineBoxHeight(line, style);
+  const lineHeight = effectiveLineBoxHeight(line, style, page);
   const padX = page.width * 0.012;
   const padY = page.height * 0.008;
   const x = (line.left / 100) * page.width - padX;
@@ -2427,7 +2504,7 @@ function paddedLineRect(page, line) {
 
 function tightLineRect(page, line) {
   const style = effectiveLineStyle(page, line);
-  const lineHeight = effectiveLineBoxHeight(line, style);
+  const lineHeight = effectiveLineBoxHeight(line, style, page);
   const padX = Math.max(1, page.width * 0.003);
   const padY = Math.max(1, page.height * 0.002);
   const x = (line.left / 100) * page.width - padX;
@@ -2588,7 +2665,7 @@ async function createMaskBlob(page) {
   ctx.globalCompositeOperation = "destination-out";
   for (const line of page.lines) {
     const style = effectiveLineStyle(page, line);
-    const lineHeight = effectiveLineBoxHeight(line, style);
+    const lineHeight = effectiveLineBoxHeight(line, style, page);
     const padX = page.width * 0.018;
     const padY = page.height * 0.014;
     const x = (line.left / 100) * page.width - padX;
@@ -2719,7 +2796,7 @@ async function exportPowerPoint() {
         x: (line.left / 100) * pptx.width,
         y: (line.top / 100) * pptx.height,
         w: (line.width / 100) * pptx.width,
-        h: (effectiveLineBoxHeight(line, style) / 100) * pptx.height,
+        h: (effectiveLineBoxHeight(line, style, page) / 100) * pptx.height,
         fontFace: style.fontName,
         bold: style.fontWeight >= 600,
         fontSize: Math.max(8, (style.fontSize / 100) * pptx.width * 72),

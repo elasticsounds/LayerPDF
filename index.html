@@ -241,9 +241,14 @@
         <header>
           <strong class="page-title"></strong>
           <div class="page-actions">
-            <button class="small add-line">Add Text</button>
-            <button class="small use-original">Use Original</button>
-            <button class="small reclean">Clean</button>
+            <select class="page-shortcuts" aria-label="Page actions">
+              <option value="" selected>Page actions...</option>
+              <option value="edit">Edit page and text styles</option>
+              <option value="removeText">Remove text from background</option>
+              <option value="restoreOriginal">Restore original page image</option>
+              <option value="addText">Add a new text box</option>
+            </select>
+            <button class="small exit-edit" hidden>Done</button>
           </div>
         </header>
         <div class="page-preview">

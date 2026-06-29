@@ -2208,13 +2208,13 @@ function applyLineStyle(box, line, pageState) {
   const style = effectiveLineStyle(pageState, line);
   const geometry = effectiveLineGeometry(line, style, pageState);
   box.style.left = `${geometry.left}%`;
-  box.style.top = `${line.top}%`;
+  box.style.top = `${geometry.top}%`;
   box.style.width = `${geometry.width}%`;
   box.style.height = `${geometry.height}%`;
   box.style.fontSize = `${style.fontSize}cqw`;
   box.style.color = style.color;
   box.style.letterSpacing = `${style.letterSpacing ?? 0}cqw`;
-  box.style.lineHeight = String(style.lineHeight ?? 1.05);
+  box.style.lineHeight = String(Math.max(Number(style.lineHeight ?? 1.05), 1.22));
   box.style.textAlign = style.align;
   box.style.fontFamily = selectedFontCssStack(style.fontName);
   box.style.fontWeight = String(style.fontWeight);
@@ -2222,18 +2222,24 @@ function applyLineStyle(box, line, pageState) {
 
 function effectiveLineGeometry(line, style, pageState) {
   const baseWidth = baseLineBoxWidth(line);
+  const baseHeight = singleLineStoredHeight(line);
   const width = effectiveLineBoxWidth(line, style, pageState, baseWidth);
+  const height = effectiveLineBoxHeight(line, style, pageState);
   let left = Number(line.left) || 0;
+  let top = Number(line.top) || 0;
   if (width > baseWidth) {
     const delta = width - baseWidth;
     if (style.align === "center") left -= delta / 2;
     if (style.align === "right") left -= delta;
   }
+  if (height > baseHeight) {
+    top -= (height - baseHeight) / 2;
+  }
   return {
     left: clamp(left, 0, Math.max(0, 100 - width)),
-    top: Number(line.top) || 0,
+    top: clamp(top, 0, Math.max(0, 100 - height)),
     width,
-    height: effectiveLineBoxHeight(line, style, pageState),
+    height,
   };
 }
 
@@ -2268,8 +2274,8 @@ function effectiveLineBoxHeight(line, style, pageState) {
   const aspect = pageState && pageState.height > 0 ? pageState.width / pageState.height : 1;
   const fontSize = Number(style.fontSize ?? line.fontSize ?? line.rawFontSize);
   const lineHeight = Number(style.lineHeight ?? line.lineHeight ?? 1.05);
-  const fontLineHeight = Number.isFinite(fontSize) ? fontSize * aspect * clamp(lineHeight, 0.8, 1.15) * 1.05 : 0;
-  return clamp(fontLineHeight || singleLineStoredHeight(line), 0.4, 12);
+  const fontLineHeight = Number.isFinite(fontSize) ? fontSize * aspect * clamp(lineHeight, 0.95, 1.35) * 1.38 : 0;
+  return clamp(fontLineHeight || singleLineStoredHeight(line), 0.4, 18);
 }
 
 function singleLineStoredHeight(line) {

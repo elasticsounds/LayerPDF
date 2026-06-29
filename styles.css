@@ -348,7 +348,7 @@ textarea {
   background: rgba(255, 255, 255, 0.04);
   text-align: center;
   white-space: nowrap;
-  overflow: hidden;
+  overflow: visible;
   user-select: text;
   outline: none;
 }

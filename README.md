@@ -119,6 +119,10 @@ spend controls.
 - Browser-side layered PDF export can only embed the bundled Mouse Memoirs font
   or a user-uploaded custom TTF/OTF. Native PDF font matches that are not
   uploaded may fall back to PDF core fonts in the exported PDF.
+- PDF export gives same-sized page background rasters unique native pixel
+  dimensions before embedding. This keeps the rendered page identical enough for
+  review while helping dimension-only image extractors match the correct
+  background to each page.
 - Cleanup mode defaults to **No cleanup - overlay only**, which keeps the
   original rendered page image and places editable text above it. This is useful
   for native PDF text extraction when you do not want white repaint boxes.

@@ -2720,12 +2720,13 @@ async function exportLayeredPdf() {
   });
 
   const registeredFonts = registerPdfFonts(doc);
+  const pageBackgrounds = await preparePdfBackgroundImages(state.pages);
 
   state.pages.forEach((page, index) => {
     if (index > 0) {
       doc.addPage([page.width, page.height], page.width >= page.height ? "landscape" : "portrait");
     }
-    doc.addImage(page.cleanDataUrl, "PNG", 0, 0, page.width, page.height);
+    doc.addImage(pageBackgrounds[index], "PNG", 0, 0, page.width, page.height);
     for (const line of page.lines) {
       const style = effectiveLineStyle(page, line);
       const lineFont = style.fontName;
@@ -2751,6 +2752,48 @@ async function exportLayeredPdf() {
   }
   doc.save("storybook-layered.pdf");
   setStatus("Exported layered PDF.", 100);
+}
+
+async function preparePdfBackgroundImages(pages) {
+  setStatus("Preparing PDF background images...", 96);
+  const loaded = await Promise.all(
+    pages.map(async (page) => {
+      const dataUrl = page.cleanDataUrl || page.imageDataUrl;
+      const image = await loadImage(dataUrl);
+      return {
+        dataUrl,
+        image,
+        width: image.naturalWidth || image.width,
+        height: image.naturalHeight || image.height,
+      };
+    }),
+  );
+  const counts = new Map();
+  for (const item of loaded) {
+    const key = `${item.width}x${item.height}`;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const ordinals = new Map();
+  return loaded.map((item) => {
+    const key = `${item.width}x${item.height}`;
+    const ordinal = ordinals.get(key) || 0;
+    ordinals.set(key, ordinal + 1);
+    if (counts.get(key) === 1 || ordinal === 0) return item.dataUrl;
+    return rasterWithUniqueNativeSize(item.image, item.width, item.height, ordinal);
+  });
+}
+
+function rasterWithUniqueNativeSize(image, width, height, ordinal) {
+  const canvas = document.createElement("canvas");
+  const saltX = ordinal % 37;
+  const saltY = Math.floor(ordinal / 37) % 37;
+  canvas.width = width + saltX;
+  canvas.height = height + saltY;
+  const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
 }
 
 function registerPdfFonts(doc) {

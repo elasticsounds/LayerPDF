@@ -2206,10 +2206,11 @@ function pageCard(pageState) {
 
 function applyLineStyle(box, line, pageState) {
   const style = effectiveLineStyle(pageState, line);
-  box.style.left = `${line.left}%`;
+  const geometry = effectiveLineGeometry(line, style, pageState);
+  box.style.left = `${geometry.left}%`;
   box.style.top = `${line.top}%`;
-  box.style.width = `${line.width}%`;
-  box.style.height = `${effectiveLineBoxHeight(line, style, pageState)}%`;
+  box.style.width = `${geometry.width}%`;
+  box.style.height = `${geometry.height}%`;
   box.style.fontSize = `${style.fontSize}cqw`;
   box.style.color = style.color;
   box.style.letterSpacing = `${style.letterSpacing ?? 0}cqw`;
@@ -2219,13 +2220,56 @@ function applyLineStyle(box, line, pageState) {
   box.style.fontWeight = String(style.fontWeight);
 }
 
+function effectiveLineGeometry(line, style, pageState) {
+  const baseWidth = baseLineBoxWidth(line);
+  const width = effectiveLineBoxWidth(line, style, pageState, baseWidth);
+  let left = Number(line.left) || 0;
+  if (width > baseWidth) {
+    const delta = width - baseWidth;
+    if (style.align === "center") left -= delta / 2;
+    if (style.align === "right") left -= delta;
+  }
+  return {
+    left: clamp(left, 0, Math.max(0, 100 - width)),
+    top: Number(line.top) || 0,
+    width,
+    height: effectiveLineBoxHeight(line, style, pageState),
+  };
+}
+
+function baseLineBoxWidth(line) {
+  const rawWidth = Number(line.rawWidth);
+  const width = Number(line.width);
+  const value = Number.isFinite(width) && width > 0 ? width : rawWidth;
+  return clamp(Number.isFinite(value) ? value : 20, 1, 100);
+}
+
+function effectiveLineBoxWidth(line, style, pageState, baseWidth = baseLineBoxWidth(line)) {
+  const measuredWidth = measuredLineTextWidth(line, style, pageState);
+  const fontSize = Number(style.fontSize ?? line.fontSize ?? line.rawFontSize);
+  const padding = clamp(Number.isFinite(fontSize) ? fontSize * 0.45 : 1.5, 0.8, 3.5);
+  return clamp(Math.max(baseWidth, measuredWidth + padding), 1, 100);
+}
+
+function measuredLineTextWidth(line, style, pageState) {
+  if (!pageState?.width || !line?.text) return 0;
+  const canvas = measuredLineTextWidth.canvas || document.createElement("canvas");
+  measuredLineTextWidth.canvas = canvas;
+  const ctx = canvas.getContext("2d");
+  const fontSizePx = (Number(style.fontSize ?? line.fontSize ?? line.rawFontSize) / 100) * pageState.width;
+  const weight = Number(style.fontWeight ?? line.fontWeight ?? 400);
+  ctx.font = `${weight} ${fontSizePx}px ${selectedFontCssStack(style.fontName)}`;
+  const letterSpacingPx = ((Number(style.letterSpacing) || 0) / 100) * pageState.width;
+  const spacing = Math.max(0, String(line.text).length - 1) * letterSpacingPx;
+  return ((ctx.measureText(String(line.text)).width + spacing) / pageState.width) * 100;
+}
+
 function effectiveLineBoxHeight(line, style, pageState) {
-  const detectedHeight = singleLineStoredHeight(line);
   const aspect = pageState && pageState.height > 0 ? pageState.width / pageState.height : 1;
   const fontSize = Number(style.fontSize ?? line.fontSize ?? line.rawFontSize);
   const lineHeight = Number(style.lineHeight ?? line.lineHeight ?? 1.05);
-  const fontLineHeight = Number.isFinite(fontSize) ? fontSize * aspect * clamp(lineHeight, 0.8, 1.15) : 0;
-  return clamp(Math.max(detectedHeight, fontLineHeight), 0.4, 24);
+  const fontLineHeight = Number.isFinite(fontSize) ? fontSize * aspect * clamp(lineHeight, 0.8, 1.15) * 1.05 : 0;
+  return clamp(fontLineHeight || singleLineStoredHeight(line), 0.4, 12);
 }
 
 function singleLineStoredHeight(line) {
@@ -2257,8 +2301,11 @@ function makeDraggable(box, line, pageState) {
     if (!start) return;
     const dx = ((event.clientX - start.x) / start.rect.width) * 100;
     const dy = ((event.clientY - start.y) / start.rect.height) * 100;
-    line.left = clamp(start.left + dx, 0, 100 - line.width);
-    line.top = clamp(start.top + dy, 0, 100 - line.height);
+    const style = effectiveLineStyle(pageState, line);
+    const boxWidth = effectiveLineBoxWidth(line, style, pageState);
+    const boxHeight = effectiveLineBoxHeight(line, style, pageState);
+    line.left = clamp(start.left + dx, 0, Math.max(0, 100 - boxWidth));
+    line.top = clamp(start.top + dy, 0, Math.max(0, 100 - boxHeight));
     applyLineStyle(box, line, pageState);
   });
   box.addEventListener("pointerup", () => {
@@ -2336,12 +2383,16 @@ function updateLineList(pageState) {
       scheduleSaveSession();
     });
     leftInput.addEventListener("input", () => {
-      line.left = clamp(Number(leftInput.value), 0, 100 - line.width);
+      const style = effectiveLineStyle(pageState, line);
+      const boxWidth = effectiveLineBoxWidth(line, style, pageState);
+      line.left = clamp(Number(leftInput.value), 0, Math.max(0, 100 - boxWidth));
       refreshPageCard(pageState);
       scheduleSaveSession();
     });
     topInput.addEventListener("input", () => {
-      line.top = clamp(Number(topInput.value), 0, 100 - line.height);
+      const style = effectiveLineStyle(pageState, line);
+      const boxHeight = effectiveLineBoxHeight(line, style, pageState);
+      line.top = clamp(Number(topInput.value), 0, Math.max(0, 100 - boxHeight));
       refreshPageCard(pageState);
       scheduleSaveSession();
     });
@@ -2487,13 +2538,13 @@ async function locallyFillWhiteText(page) {
 
 function paddedLineRect(page, line) {
   const style = effectiveLineStyle(page, line);
-  const lineHeight = effectiveLineBoxHeight(line, style, page);
+  const geometry = effectiveLineGeometry(line, style, page);
   const padX = page.width * 0.012;
   const padY = page.height * 0.008;
-  const x = (line.left / 100) * page.width - padX;
-  const y = (line.top / 100) * page.height - padY;
-  const w = (line.width / 100) * page.width + padX * 2;
-  const h = (lineHeight / 100) * page.height + padY * 2;
+  const x = (geometry.left / 100) * page.width - padX;
+  const y = (geometry.top / 100) * page.height - padY;
+  const w = (geometry.width / 100) * page.width + padX * 2;
+  const h = (geometry.height / 100) * page.height + padY * 2;
   return {
     x: clamp(x, 0, page.width),
     y: clamp(y, 0, page.height),
@@ -2504,13 +2555,13 @@ function paddedLineRect(page, line) {
 
 function tightLineRect(page, line) {
   const style = effectiveLineStyle(page, line);
-  const lineHeight = effectiveLineBoxHeight(line, style, page);
+  const geometry = effectiveLineGeometry(line, style, page);
   const padX = Math.max(1, page.width * 0.003);
   const padY = Math.max(1, page.height * 0.002);
-  const x = (line.left / 100) * page.width - padX;
-  const y = (line.top / 100) * page.height - padY;
-  const w = (line.width / 100) * page.width + padX * 2;
-  const h = (lineHeight / 100) * page.height + padY * 2;
+  const x = (geometry.left / 100) * page.width - padX;
+  const y = (geometry.top / 100) * page.height - padY;
+  const w = (geometry.width / 100) * page.width + padX * 2;
+  const h = (geometry.height / 100) * page.height + padY * 2;
   const clampedX = clamp(x, 0, page.width);
   const clampedY = clamp(y, 0, page.height);
   return {
@@ -2665,13 +2716,13 @@ async function createMaskBlob(page) {
   ctx.globalCompositeOperation = "destination-out";
   for (const line of page.lines) {
     const style = effectiveLineStyle(page, line);
-    const lineHeight = effectiveLineBoxHeight(line, style, page);
+    const geometry = effectiveLineGeometry(line, style, page);
     const padX = page.width * 0.018;
     const padY = page.height * 0.014;
-    const x = (line.left / 100) * page.width - padX;
-    const y = (line.top / 100) * page.height - padY;
-    const w = (line.width / 100) * page.width + padX * 2;
-    const h = (lineHeight / 100) * page.height + padY * 2;
+    const x = (geometry.left / 100) * page.width - padX;
+    const y = (geometry.top / 100) * page.height - padY;
+    const w = (geometry.width / 100) * page.width + padX * 2;
+    const h = (geometry.height / 100) * page.height + padY * 2;
     roundRect(ctx, x, y, w, h, Math.max(10, h * 0.35));
     ctx.fill();
   }
@@ -2728,6 +2779,7 @@ async function exportLayeredPdf() {
     doc.addImage(page.cleanDataUrl || page.imageDataUrl, "PNG", 0, 0, page.width, page.height);
     for (const line of page.lines) {
       const style = effectiveLineStyle(page, line);
+      const geometry = effectiveLineGeometry(line, style, page);
       const lineFont = style.fontName;
       const fontSize = (style.fontSize / 100) * page.width;
       const fontStyle = !registeredFonts.has(lineFont) && style.fontWeight >= 600 ? "bold" : "normal";
@@ -2737,10 +2789,10 @@ async function exportLayeredPdf() {
       if (typeof doc.setCharSpace === "function") {
         doc.setCharSpace(((style.letterSpacing ?? 0) / 100) * page.width);
       }
-      const lineLeft = (line.left / 100) * page.width;
-      const lineWidth = (line.width / 100) * page.width;
+      const lineLeft = (geometry.left / 100) * page.width;
+      const lineWidth = (geometry.width / 100) * page.width;
       const x = lineTextAnchor(lineLeft, lineWidth, style.align);
-      const y = (line.top / 100) * page.height + fontSize;
+      const y = (geometry.top / 100) * page.height + fontSize;
       doc.text(line.text, x, y, {
         align: style.align,
       });
@@ -2881,12 +2933,13 @@ async function exportPowerPoint() {
     slide.addImage({ data: page.cleanDataUrl, x: 0, y: 0, w: pptx.width, h: pptx.height });
     for (const line of page.lines) {
       const style = effectiveLineStyle(page, line);
+      const geometry = effectiveLineGeometry(line, style, page);
       const charSpacing = ((style.letterSpacing ?? 0) / 100) * pptx.width * 72;
       slide.addText(line.text, {
-        x: (line.left / 100) * pptx.width,
-        y: (line.top / 100) * pptx.height,
-        w: (line.width / 100) * pptx.width,
-        h: (effectiveLineBoxHeight(line, style, page) / 100) * pptx.height,
+        x: (geometry.left / 100) * pptx.width,
+        y: (geometry.top / 100) * pptx.height,
+        w: (geometry.width / 100) * pptx.width,
+        h: (geometry.height / 100) * pptx.height,
         fontFace: style.fontName,
         bold: style.fontWeight >= 600,
         fontSize: Math.max(8, (style.fontSize / 100) * pptx.width * 72),

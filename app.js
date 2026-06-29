@@ -2720,13 +2720,12 @@ async function exportLayeredPdf() {
   });
 
   const registeredFonts = registerPdfFonts(doc);
-  const pageBackgrounds = await preparePdfBackgroundImages(state.pages);
 
   state.pages.forEach((page, index) => {
     if (index > 0) {
       doc.addPage([page.width, page.height], page.width >= page.height ? "landscape" : "portrait");
     }
-    doc.addImage(pageBackgrounds[index], "PNG", 0, 0, page.width, page.height);
+    doc.addImage(page.cleanDataUrl || page.imageDataUrl, "PNG", 0, 0, page.width, page.height);
     for (const line of page.lines) {
       const style = effectiveLineStyle(page, line);
       const lineFont = style.fontName;
@@ -2750,50 +2749,98 @@ async function exportLayeredPdf() {
   if (typeof doc.setCharSpace === "function") {
     doc.setCharSpace(0);
   }
-  doc.save("storybook-layered.pdf");
+  const rawPdf = doc.output("arraybuffer");
+  const prunedPdf = await pruneUnusedPageImageResources(rawPdf);
+  downloadArrayBuffer(prunedPdf, "storybook-layered.pdf", "application/pdf");
   setStatus("Exported layered PDF.", 100);
 }
 
-async function preparePdfBackgroundImages(pages) {
-  setStatus("Preparing PDF background images...", 96);
-  const loaded = await Promise.all(
-    pages.map(async (page) => {
-      const dataUrl = page.cleanDataUrl || page.imageDataUrl;
-      const image = await loadImage(dataUrl);
-      return {
-        dataUrl,
-        image,
-        width: image.naturalWidth || image.width,
-        height: image.naturalHeight || image.height,
-      };
-    }),
-  );
-  const counts = new Map();
-  for (const item of loaded) {
-    const key = `${item.width}x${item.height}`;
-    counts.set(key, (counts.get(key) || 0) + 1);
+async function pruneUnusedPageImageResources(pdfBytes) {
+  const pdfLib = window.PDFLib;
+  if (!pdfLib?.PDFDocument) {
+    setStatus("PDF resource cleanup library did not load; exporting with shared image resources.");
+    return pdfBytes;
   }
-  const ordinals = new Map();
-  return loaded.map((item) => {
-    const key = `${item.width}x${item.height}`;
-    const ordinal = ordinals.get(key) || 0;
-    ordinals.set(key, ordinal + 1);
-    if (counts.get(key) === 1 || ordinal === 0) return item.dataUrl;
-    return rasterWithUniqueNativeSize(item.image, item.width, item.height, ordinal);
-  });
+  setStatus("Pruning page image resources...", 98);
+  const { PDFDocument, PDFName, PDFDict } = pdfLib;
+  if (!PDFName || !PDFDict?.withContext) return pdfBytes;
+  const pdfDoc = await PDFDocument.load(pdfBytes);
+  const context = pdfDoc.context;
+  for (const page of pdfDoc.getPages()) {
+    const resources = lookupPdfObject(context, page.node.get(PDFName.of("Resources")));
+    if (!isPdfDict(resources)) continue;
+    const xObjects = lookupPdfObject(context, resources.get(PDFName.of("XObject")));
+    if (!isPdfDict(xObjects)) continue;
+    const used = drawnImageResourceNames(context, page, PDFName);
+    if (used.size === 0 || used.size >= [...xObjects.keys()].length) continue;
+    const pageResources = PDFDict.withContext(context);
+    for (const key of resources.keys()) {
+      if (key.toString() !== "/XObject") pageResources.set(key, resources.get(key));
+    }
+    const pageXObjects = PDFDict.withContext(context);
+    for (const key of xObjects.keys()) {
+      if (used.has(key.toString())) pageXObjects.set(key, xObjects.get(key));
+    }
+    pageResources.set(PDFName.of("XObject"), pageXObjects);
+    page.node.set(PDFName.of("Resources"), context.register(pageResources));
+  }
+  return pdfDoc.save({ useObjectStreams: false });
 }
 
-function rasterWithUniqueNativeSize(image, width, height, ordinal) {
-  const canvas = document.createElement("canvas");
-  const saltX = ordinal % 37;
-  const saltY = Math.floor(ordinal / 37) % 37;
-  canvas.width = width + saltX;
-  canvas.height = height + saltY;
-  const ctx = canvas.getContext("2d");
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-  return canvas.toDataURL("image/png");
+function drawnImageResourceNames(context, page, PDFName) {
+  const contents = lookupPdfObject(context, page.node.get(PDFName.of("Contents")));
+  const streams = isPdfArray(contents) ? contents.asArray().map((item) => lookupPdfObject(context, item)) : [contents];
+  const used = new Set();
+  for (const stream of streams) {
+    if (!isPdfStream(stream)) continue;
+    const decoded = decodePdfContentStream(stream);
+    for (const match of decoded.matchAll(/\/([A-Za-z][A-Za-z0-9_.-]*)\s+Do\b/g)) {
+      used.add(`/${match[1]}`);
+    }
+  }
+  return used;
+}
+
+function lookupPdfObject(context, object) {
+  return isPdfRef(object) ? context.lookup(object) : object;
+}
+
+function isPdfRef(object) {
+  return object?.constructor?.name === "PDFRef";
+}
+
+function isPdfDict(object) {
+  return object?.constructor?.name === "PDFDict" && typeof object.keys === "function" && typeof object.get === "function";
+}
+
+function isPdfArray(object) {
+  return object?.constructor?.name === "PDFArray" && typeof object.asArray === "function";
+}
+
+function isPdfStream(object) {
+  return object?.contents && object?.dict;
+}
+
+function decodePdfContentStream(stream) {
+  const contents = stream.contents;
+  if (!contents) return "";
+  const filter = stream.dict?.get?.(window.PDFLib.PDFName.of("Filter"))?.toString?.();
+  const bytes = filter === "/FlateDecode" ? inflateZlib(contents) : contents;
+  return bytesToBinaryString(bytes);
+}
+
+function inflateZlib(bytes) {
+  if (window.pako?.inflate) return window.pako.inflate(bytes);
+  return bytes;
+}
+
+function bytesToBinaryString(bytes) {
+  let output = "";
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    output += String.fromCharCode(...bytes.slice(i, i + chunkSize));
+  }
+  return output;
 }
 
 function registerPdfFonts(doc) {
@@ -2876,6 +2923,18 @@ function roundRect(ctx, x, y, width, height, radius) {
 
 function canvasToBlob(canvas) {
   return new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+}
+
+function downloadArrayBuffer(bytes, fileName, mimeType) {
+  const blob = new Blob([bytes], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 async function dataUrlToBlob(dataUrl) {
